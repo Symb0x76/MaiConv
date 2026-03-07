@@ -1,0 +1,12 @@
+# Build
+build/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# Test assets
+StreamingAssets/
+
+# External repositories
+external/
