@@ -20,6 +20,11 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 - 谱面变换：旋转 + tick 偏移
 - 三平台 CI：Windows / Linux / macOS
 
+## 依赖目录说明
+
+- `third_party/*`：所有第三方依赖均在此目录，并由 git submodule 管理。
+- 当前子模块：`CLI11`、`Catch2`、`tinyxml2`、`vgmstream`、`shine`、`minimp4`、`UABE`。
+
 ## 构建
 
 ```bash
@@ -126,10 +131,12 @@ assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
   pv.mp4
 ```
 
-当源素材是原版游戏格式时，`assets` 会通过内置 C/C++ 流程转换（无需外部命令行工具）：
+当源素材是原版游戏格式时，`assets` 的转换策略如下：
 - `acb + awb -> track.mp3`（内置 `libvgmstream` + `shine`）
 - `ab -> bg.png`（内置 PNG 提取）
-- `dat/usm -> pv.mp4`（内置 USM 解析 + VP9 封装 MP4）
+- `dat/usm -> pv.mp4`
+  - H.264 流：内置 USM 解析 + MP4 封装
+  - VP9 流：通过 `PATH` 中的 `ffmpeg` 转码为 H.264
 
 若转换失败，不再保留原始素材文件；该曲目会被标记为 `_Incomplete`（未使用 `--ignore` 时则直接失败），并将失败的源/目标路径写入 `_log.txt`。
 
@@ -148,3 +155,4 @@ assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
 - 默认输出文件名：
   - Simai：`maidata.txt`
   - Ma2：`result.ma2`
+

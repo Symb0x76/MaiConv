@@ -65,6 +65,8 @@ target_include_directories(MaiConv_core PRIVATE
 target_link_libraries(MaiConv_core PUBLIC tinyxml2::tinyxml2)
 target_link_libraries(MaiConv_core PRIVATE libvgmstream shine)
 
+
+
 if(MSVC)
     target_compile_options(MaiConv_core PRIVATE /W4 /permissive- /Zc:__cplusplus)
 else()
@@ -113,3 +115,4 @@ if(MAICONV_BUILD_TESTS)
     )
     catch_discover_tests(MaiConv_unit_tests)
 endif()
+

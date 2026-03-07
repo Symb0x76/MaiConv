@@ -20,6 +20,11 @@ Cross-platform C++ reimplementation of [MaichartConverter](https://github.com/Ne
 - Note transforms: rotate + tick shift
 - Three-platform CI: Windows / Linux / macOS
 
+## Dependency Layout
+
+- `third_party/*`: all third-party dependencies are managed by git submodules.
+- Current submodules: `CLI11`, `Catch2`, `tinyxml2`, `vgmstream`, `shine`, `minimp4`, `UABE`.
+
 ## Build
 
 ```bash
@@ -126,10 +131,12 @@ For assets export, each song folder always contains `maidata.txt`, and media fil
   pv.mp4
 ```
 
-When source media is in original game formats, `assets` converts them via built-in C/C++ code (no external CLI tools required):
+When source media is in original game formats, `assets` converts them as follows:
 - `acb + awb -> track.mp3` (built-in `libvgmstream` + `shine`)
 - `ab -> bg.png` (embedded PNG extraction)
-- `dat/usm -> pv.mp4` (built-in USM parser + VP9 MP4 mux)
+- `dat/usm -> pv.mp4`
+  - H.264 stream: built-in USM parser + MP4 mux
+  - VP9 stream: VP9->H.264 transcode via `ffmpeg` in `PATH`
 
 If conversion fails, raw assets are **not** preserved. The song is marked as `_Incomplete` (or the command fails without `--ignore`), and failed source/target paths are written to `_log.txt`.
 
@@ -148,3 +155,4 @@ If conversion fails, raw assets are **not** preserved. The song is marked as `_I
 - Default output file names:
   - Simai: `maidata.txt`
   - Ma2: `result.ma2`
+
