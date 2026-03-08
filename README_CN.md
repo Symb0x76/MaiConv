@@ -135,8 +135,7 @@ assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
 - `acb + awb -> track.mp3`（内置 `libvgmstream` + `shine`）
 - `ab -> bg.png`（内置 PNG 提取）
 - `dat/usm -> pv.mp4`
-  - H.264 流：内置 USM 解析 + MP4 封装
-  - VP9 流：通过 `PATH` 中的 `ffmpeg` 转码为 H.264
+  - 支持 H.264 流：内置 USM 解析 + MP4 封装
 
 若转换失败，不再保留原始素材文件；该曲目会被标记为 `_Incomplete`（未使用 `--ignore` 时则直接失败），并将失败的源/目标路径写入 `_log.txt`。
 

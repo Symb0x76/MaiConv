@@ -136,7 +136,6 @@ When source media is in original game formats, `assets` converts them as follows
 - `ab -> bg.png` (embedded PNG extraction)
 - `dat/usm -> pv.mp4`
   - H.264 stream: built-in USM parser + MP4 mux
-  - VP9 stream: VP9->H.264 transcode via `ffmpeg` in `PATH`
 
 If conversion fails, raw assets are **not** preserved. The song is marked as `_Incomplete` (or the command fails without `--ignore`), and failed source/target paths are written to `_log.txt`.
 

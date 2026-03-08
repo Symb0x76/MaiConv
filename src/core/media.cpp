@@ -33,11 +33,6 @@ uint32_t read_u32_be(const uint8_t* p) {
          static_cast<uint32_t>(p[3]);
 }
 
-uint16_t read_u16_le(const uint8_t* p) {
-  return static_cast<uint16_t>(p[0]) |
-         static_cast<uint16_t>(static_cast<uint16_t>(p[1]) << 8U);
-}
-
 uint16_t read_u16_be(const uint8_t* p) {
   return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8U) |
                                static_cast<uint16_t>(p[1]));
@@ -674,55 +669,14 @@ std::vector<uint8_t> decrypt_usm_video_packet(const std::vector<uint8_t>& packet
 enum class VideoCodec {
   kUnknown,
   kH264,
-  kVp9Ivf,
 };
 
-std::size_t find_vp9_ivf_start(const std::vector<uint8_t>& data) {
-  constexpr std::array<uint8_t, 4> kIvfSig = {
-      static_cast<uint8_t>('D'),
-      static_cast<uint8_t>('K'),
-      static_cast<uint8_t>('I'),
-      static_cast<uint8_t>('F')};
-  constexpr std::array<uint8_t, 4> kVp9Sig = {
-      static_cast<uint8_t>('V'),
-      static_cast<uint8_t>('P'),
-      static_cast<uint8_t>('9'),
-      static_cast<uint8_t>('0')};
-
-  if (data.size() < 32U) {
-    return std::string::npos;
-  }
-
-  for (std::size_t i = 0; i + 32U <= data.size(); ++i) {
-    if (!std::equal(kIvfSig.begin(), kIvfSig.end(), data.begin() + static_cast<std::ptrdiff_t>(i))) {
-      continue;
-    }
-    if (!std::equal(kVp9Sig.begin(), kVp9Sig.end(), data.begin() + static_cast<std::ptrdiff_t>(i + 8U))) {
-      continue;
-    }
-    const uint16_t header_size = read_u16_le(data.data() + i + 6U);
-    if (header_size >= 32U && i + static_cast<std::size_t>(header_size) <= data.size()) {
-      return i;
-    }
-  }
-
-  return std::string::npos;
-}
-
-bool is_vp9_ivf_stream(const std::vector<uint8_t>& data) {
-  return find_vp9_ivf_start(data) != std::string::npos;
-}
-
 VideoCodec detect_video_codec(const std::vector<uint8_t>& data) {
-  if (is_vp9_ivf_stream(data)) {
-    return VideoCodec::kVp9Ivf;
-  }
   if (has_h264_start_code(data)) {
     return VideoCodec::kH264;
   }
   return VideoCodec::kUnknown;
 }
-
 struct UsmVideoStream {
   std::vector<uint8_t> data;
   VideoCodec codec = VideoCodec::kUnknown;
@@ -811,13 +765,8 @@ bool extract_usm_video_stream(const std::filesystem::path& source, UsmVideoStrea
     }
 
     channel.data.insert(channel.data.end(), decoded.begin(), decoded.end());
-
-    if (channel.codec != VideoCodec::kH264) {
-      if (has_h264_start_code(channel.data)) {
-        channel.codec = VideoCodec::kH264;
-      } else if (channel.codec == VideoCodec::kUnknown && is_vp9_ivf_stream(channel.data)) {
-        channel.codec = VideoCodec::kVp9Ivf;
-      }
+    if (channel.codec != VideoCodec::kH264 && has_h264_start_code(channel.data)) {
+      channel.codec = VideoCodec::kH264;
     }
   }
 
@@ -832,74 +781,11 @@ bool extract_usm_video_stream(const std::filesystem::path& source, UsmVideoStrea
       break;
     }
   }
-
-  if (channels[selected_channel].codec != VideoCodec::kH264) {
-    for (const uint8_t c : channel_order) {
-      if (channels[c].codec == VideoCodec::kVp9Ivf) {
-        selected_channel = c;
-        break;
-      }
-    }
-  }
-
   out.data = std::move(channels[selected_channel].data);
   out.codec = detect_video_codec(out.data);
   return !out.data.empty();
 }
 
-bool fallback_ffmpeg_vp9_to_h264(const std::vector<uint8_t>& vp9_ivf,
-                                 const std::filesystem::path& target_mp4) {
-  if (vp9_ivf.empty()) {
-    return false;
-  }
-
-  const auto tmp_dir = make_temp_work_dir();
-  const auto tmp_ivf = tmp_dir / "input.ivf";
-
-  {
-    std::ofstream out(tmp_ivf, std::ios::binary | std::ios::trunc);
-    if (!out) {
-      std::error_code ec;
-      std::filesystem::remove_all(tmp_dir, ec);
-      return false;
-    }
-    out.write(reinterpret_cast<const char*>(vp9_ivf.data()), static_cast<std::streamsize>(vp9_ivf.size()));
-    out.flush();
-  }
-
-  if (!tmp_ivf.parent_path().empty()) {
-    std::filesystem::create_directories(tmp_ivf.parent_path());
-  }
-  if (!target_mp4.parent_path().empty()) {
-    std::filesystem::create_directories(target_mp4.parent_path());
-  }
-
-#if defined(_WIN32)
-  const std::wstring cmd =
-      L"ffmpeg -y -loglevel error -i \"" +
-      tmp_ivf.wstring() +
-      L"\" -an -c:v libx264 -pix_fmt yuv420p \"" +
-      target_mp4.wstring() +
-      L"\"";
-  const int rc = _wsystem(cmd.c_str());
-#else
-  const std::string cmd =
-      "ffmpeg -y -loglevel error -i \"" +
-      tmp_ivf.string() +
-      "\" -an -c:v libx264 -pix_fmt yuv420p \"" +
-      target_mp4.string() +
-      "\"";
-  const int rc = std::system(cmd.c_str());
-#endif
-
-  std::error_code ec;
-  std::filesystem::remove_all(tmp_dir, ec);
-  return rc == 0 && file_non_empty(target_mp4);
-}
-bool transcode_vp9_ivf_to_h264_mp4(const std::vector<uint8_t>& vp9_ivf,
-                                   const std::filesystem::path& target_mp4) {
-  return fallback_ffmpeg_vp9_to_h264(vp9_ivf, target_mp4);
-}
 #if defined(_WIN32)
 std::FILE* open_file_for_write(const std::filesystem::path& path) {
   return _wfopen(path.c_str(), L"wb");
@@ -1000,18 +886,12 @@ bool convert_usm_to_mp4(const std::filesystem::path& source,
     return false;
   }
 
-
-  if (stream.codec == VideoCodec::kH264) {
-    return mux_h264_annexb_to_mp4(stream.data, target_mp4);
+  if (stream.codec != VideoCodec::kH264) {
+    return false;
   }
 
-  if (transcode_vp9_ivf_to_h264_mp4(stream.data, target_mp4)) {
-    return true;
-  }
-
-  return false;
+  return mux_h264_annexb_to_mp4(stream.data, target_mp4);
 }
-
 }  // namespace
 
 bool convert_audio_to_mp3(const std::filesystem::path& source,
@@ -1108,6 +988,10 @@ bool convert_dat_or_usm_to_mp4(const std::filesystem::path& source,
 }
 
 }  // namespace maiconv
+
+
+
+
 
 
 
