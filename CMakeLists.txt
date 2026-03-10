@@ -82,6 +82,51 @@ maiconv_ensure_submodule("third_party/tinyxml2" "third_party/tinyxml2/CMakeLists
 maiconv_ensure_submodule("third_party/vgmstream" "third_party/vgmstream/CMakeLists.txt")
 maiconv_ensure_submodule("third_party/shine" "third_party/shine/src/lib/layer3.h")
 
+function(maiconv_patch_vgmstream_ffmpeg)
+    set(ffmpeg_cmake "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vgmstream/cmake/dependencies/ffmpeg.cmake")
+    if(NOT EXISTS "${ffmpeg_cmake}")
+        message(WARNING "vgmstream ffmpeg.cmake not found: ${ffmpeg_cmake}")
+        return()
+    endif()
+
+    file(READ "${ffmpeg_cmake}" ffmpeg_content)
+    string(FIND "${ffmpeg_content}" "if(NOT APPLE)" ffmpeg_has_apple_guard)
+    string(FIND "${ffmpeg_content}" "--extra-cflags=--static" ffmpeg_has_static_cflags)
+    if(ffmpeg_has_static_cflags EQUAL -1)
+        return()
+    endif()
+    if(NOT ffmpeg_has_apple_guard EQUAL -1)
+        return()
+    endif()
+
+    set(ffmpeg_old_block
+        "                --enable-swresample
+                --extra-libs=-static
+                --extra-cflags=--static
+                --pkg-config-flags=--static
+            )")
+    set(ffmpeg_new_block
+        "                --enable-swresample
+            )
+            if(NOT APPLE)
+                list(APPEND FFMPEG_CONF_ARGS
+                    --extra-libs=-static
+                    --extra-cflags=--static
+                    --pkg-config-flags=--static
+                )
+            endif()")
+
+    string(FIND "${ffmpeg_content}" "${ffmpeg_old_block}" ffmpeg_patch_pos)
+    if(ffmpeg_patch_pos EQUAL -1)
+        message(STATUS "Skipped vgmstream ffmpeg auto-patch: expected block not found in ${ffmpeg_cmake}")
+        return()
+    endif()
+
+    string(REPLACE "${ffmpeg_old_block}" "${ffmpeg_new_block}" ffmpeg_content "${ffmpeg_content}")
+    file(WRITE "${ffmpeg_cmake}" "${ffmpeg_content}")
+    message(STATUS "Applied local vgmstream ffmpeg compatibility patch")
+endfunction()
+
 set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(third_party/CLI11 EXCLUDE_FROM_ALL)
@@ -122,6 +167,8 @@ set(USE_G719 OFF CACHE BOOL "" FORCE)
 set(USE_ATRAC9 OFF CACHE BOOL "" FORCE)
 set(USE_CELT OFF CACHE BOOL "" FORCE)
 set(USE_SPEEX OFF CACHE BOOL "" FORCE)
+
+maiconv_patch_vgmstream_ffmpeg()
 
 add_subdirectory(third_party/vgmstream third_party/vgmstream-build EXCLUDE_FROM_ALL)
 
@@ -192,6 +239,26 @@ add_library(MaiConv_core
     src/core/assets.cpp
     src/core/unity_uabe/Texture/lodepng.cpp
 )
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+    set_source_files_properties(
+        src/core/unity_uabe/Texture/lodepng.cpp
+        PROPERTIES
+        COMPILE_OPTIONS "-w"
+    )
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(
+        src/core/unity_uabe/Texture/lodepng.cpp
+        PROPERTIES
+        COMPILE_OPTIONS "-w"
+    )
+elseif(MSVC)
+    set_source_files_properties(
+        src/core/unity_uabe/Texture/lodepng.cpp
+        PROPERTIES
+        COMPILE_OPTIONS "/w"
+    )
+endif()
 
 target_include_directories(MaiConv_core PUBLIC include)
 target_include_directories(MaiConv_core PRIVATE
