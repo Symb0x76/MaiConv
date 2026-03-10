@@ -1,11 +1,11 @@
 #include "maiconv/core/io.hpp"
 
-#include "AssetBundleFileFormat.h"
-#include "AssetTypeClass.h"
-#include "AssetsFileFormat.h"
-#include "AssetsFileReader.h"
-#include "AssetsFileTable.h"
-#include "lodepng.h"
+#include "unity_uabe/AssetsTools/AssetBundleFileFormat.h"
+#include "unity_uabe/AssetsTools/AssetTypeClass.h"
+#include "unity_uabe/AssetsTools/AssetsFileFormat.h"
+#include "unity_uabe/AssetsTools/AssetsFileReader.h"
+#include "unity_uabe/AssetsTools/AssetsFileTable.h"
+#include "unity_uabe/Texture/lodepng.h"
 
 #include <algorithm>
 #include <array>
