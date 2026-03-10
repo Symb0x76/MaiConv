@@ -1,8 +1,8 @@
 #include "../AssetsTools/ClassDatabaseFile.h"
 #include "../AssetsTools/AssetTypeClass.h"
 #include "../AssetsTools/AssetsFileReader.h"
+#include "../inc/LZMA/LzmaLib.h"
 #include "../libCompression/lz4.h"
-#include "..\inc\LZMA\LzmaLib.h"
 #include "stdafx.h"
 #include <array>
 #include <cstddef>
@@ -748,7 +748,7 @@ class StringTableWriter {
     size_t matchCount;
     size_t *matches;  // offsets into stringTable
   } *stringHashTable; // only for making AddString optimization faster
-                      // (searching for double entries)
+  // (searching for double entries)
 public:
   StringTableWriter(EStringTableWriter_AddString_OptModes optMode =
                         StringTableWriter_Opt_LinearSearch) {
