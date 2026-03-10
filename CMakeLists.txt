@@ -13,6 +13,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile commands for tooling" FORCE)
 
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+endif()
+
 find_package(Git QUIET)
 find_program(MAICONV_CCACHE_PROGRAM ccache)
 
@@ -127,7 +131,7 @@ file(GLOB SHINE_SOURCES CONFIGURE_DEPENDS
 add_library(shine STATIC ${SHINE_SOURCES})
 target_include_directories(shine PUBLIC third_party/shine/src/lib)
 
-add_library(maiconv_uabe_libCompression STATIC
+set(MAICONV_UABE_LIBCOMPRESSION_SOURCES
     src/core/unity_uabe/libCompression/lz4.c
     src/core/unity_uabe/libCompression/lz4frame.c
     src/core/unity_uabe/libCompression/lz4hc.c
@@ -140,7 +144,14 @@ add_library(maiconv_uabe_libCompression STATIC
     src/core/unity_uabe/libCompression/LzmaEnc.c
     src/core/unity_uabe/libCompression/Threads.c
 )
+
+add_library(maiconv_uabe_libCompression STATIC
+    ${MAICONV_UABE_LIBCOMPRESSION_SOURCES}
+)
 target_include_directories(maiconv_uabe_libCompression PUBLIC src/core/unity_uabe/libCompression)
+if(NOT WIN32)
+    target_link_libraries(maiconv_uabe_libCompression PUBLIC Threads::Threads)
+endif()
 
 add_library(maiconv_uabe_libStringConverter STATIC
     src/core/unity_uabe/libStringConverter/convert.cpp

@@ -1,0 +1,56 @@
+#!/usr/bin/env sh
+set -eu
+
+# Format only staged C/C++ source files under project code directories.
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ -z "${STAGED_FILES}" ]; then
+	exit 0
+fi
+
+if ! command -v clang-format >/dev/null 2>&1; then
+	echo "pre-commit: clang-format not found in PATH"
+	echo "pre-commit: install clang-format to continue"
+	exit 1
+fi
+
+FILES_TO_FORMAT=""
+
+OLD_IFS=${IFS}
+IFS='
+'
+for f in ${STAGED_FILES}; do
+	case "${f}" in
+		src/*|include/*|tests/*)
+			case "${f}" in
+				*.c|*.cc|*.cpp|*.cxx|*.h|*.hh|*.hpp|*.hxx)
+					if [ -f "${f}" ]; then
+						FILES_TO_FORMAT="${FILES_TO_FORMAT}
+${f}"
+					fi
+					;;
+			esac
+			;;
+	esac
+done
+IFS=${OLD_IFS}
+
+if [ -z "${FILES_TO_FORMAT}" ]; then
+	exit 0
+fi
+
+echo "pre-commit: formatting staged C/C++ files"
+
+OLD_IFS=${IFS}
+IFS='
+'
+for f in ${FILES_TO_FORMAT}; do
+	if [ -z "${f}" ]; then
+		continue
+	fi
+	clang-format -i "${f}"
+	git add "${f}"
+done
+IFS=${OLD_IFS}
+
+exit 0
