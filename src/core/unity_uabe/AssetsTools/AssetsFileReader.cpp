@@ -32,12 +32,24 @@ typedef int errno_t;
 #define _tcscmp wcscmp
 #endif
 
+#ifndef _tcslen
+#define _tcslen wcslen
+#endif
+
 #ifndef _tcscpy
 #define _tcscpy wcscpy
 #endif
 
 #ifndef _sntprintf
 #define _sntprintf swprintf
+#endif
+
+#ifndef _ftelli64
+#define _ftelli64 ftello
+#endif
+
+#ifndef _fseeki64
+#define _fseeki64 fseeko
 #endif
 
 static errno_t _tfopen_s(FILE **pFile, const TCHAR *filePath,

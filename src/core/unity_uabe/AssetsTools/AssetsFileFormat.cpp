@@ -2153,7 +2153,7 @@ bool HasName(uint32_t type) {
 void _BlankVerifyLogger(const char *message) {}
 ASSETSTOOLS_API bool
 AssetsFile::VerifyAssetsFile(AssetsFileVerifyLogger logger) {
-  char sprntTmp[100];
+  char sprntTmp[256];
   bool ret;
   QWORD fileListOffs = 0;
   int fileListSize = 0;
@@ -2191,13 +2191,13 @@ AssetsFile::VerifyAssetsFile(AssetsFileVerifyLogger logger) {
       this->typeTree.unityVersion[0] > '9') {
     char sprntTmp2[100];
     snprintf(sprntTmp2, sizeof(sprntTmp2), "Invalid version string at %llX",
-             (uint64_t)((uintptr_t)(&this->typeTree.unityVersion[0]) -
-                        (uintptr_t)(&this->header)));
+             (unsigned long long)((uintptr_t)(&this->typeTree.unityVersion[0]) -
+                                  (uintptr_t)(&this->header)));
     errorData = sprntTmp2;
     goto _fileFormatError;
   }
   snprintf(sprntTmp, sizeof(sprntTmp),
-           "INFO: The .assets file was built for Unity %s.",
+           "INFO: The .assets file was built for Unity %.63s.",
            this->typeTree.unityVersion);
   logger(sprntTmp);
 
