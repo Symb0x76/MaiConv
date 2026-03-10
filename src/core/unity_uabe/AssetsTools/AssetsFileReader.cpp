@@ -1,9 +1,72 @@
 #include "AssetsFileReader.h"
 #include "../libStringConverter/convert.h"
 #include "stdafx.h"
+#include <cerrno>
+#include <cwchar>
 #include <mutex>
+#ifdef _WIN32
 #include <tchar.h>
+#endif
 #include <vector>
+
+#ifndef TCHAR
+#ifdef _UNICODE
+typedef wchar_t TCHAR;
+#else
+typedef char TCHAR;
+#endif
+#endif
+
+#ifndef _T
+#ifdef _UNICODE
+#define _T(x) L##x
+#else
+#define _T(x) x
+#endif
+#endif
+
+#ifndef _WIN32
+typedef int errno_t;
+
+#ifndef _tcscmp
+#define _tcscmp wcscmp
+#endif
+
+#ifndef _tcscpy
+#define _tcscpy wcscpy
+#endif
+
+#ifndef _sntprintf
+#define _sntprintf swprintf
+#endif
+
+static errno_t _tfopen_s(FILE **pFile, const TCHAR *filePath,
+                         const TCHAR *mode) {
+  if (pFile == nullptr) {
+    return EINVAL;
+  }
+
+  size_t pathLen = 0;
+  char *mbPath = _WideToMultiByte(filePath, pathLen);
+  if (mbPath == nullptr) {
+    *pFile = nullptr;
+    return EINVAL;
+  }
+
+  size_t modeLen = 0;
+  char *mbMode = _WideToMultiByte(mode, modeLen);
+  if (mbMode == nullptr) {
+    _FreeCHAR(mbPath);
+    *pFile = nullptr;
+    return EINVAL;
+  }
+
+  *pFile = fopen(mbPath, mbMode);
+  _FreeCHAR(mbPath);
+  _FreeCHAR(mbMode);
+  return (*pFile != nullptr) ? 0 : errno;
+}
+#endif
 
 void AssetsVerifyLoggerToConsole(const char *message) {
   printf("%s\n", message);
@@ -89,7 +152,7 @@ public:
       free(filePath);
       filePath = NULL;
       flags = RWOpenFlags_None; // RWOpenFlags_Unclosable could otherwise
-                                // prevent closing the file.
+      // prevent closing the file.
       Close();
     }
   }
@@ -424,7 +487,7 @@ public:
     else {
       filePath[filePathLen - 3] =
           0; // the actual first name is .split0, the four additional nulls are
-             // just reserved space.
+      // just reserved space.
       if (!AssetsReaderFromFile::Reopen())
         ret = false;
       else if (!wasOpened || allowUpdate) {
@@ -703,7 +766,7 @@ public:
           curSplitPos += read;
           remainingSize -= read;
           if (read < curReadSize) // curSplitPos is also allowed to be equal to
-                                  // the current split size.
+            // the current split size.
             break;
         }
         if (curSplitPos >= splitSizes[curSplitIndex].size) {
@@ -1337,7 +1400,7 @@ public:
       free(filePath);
       filePath = NULL;
       flags = RWOpenFlags_None; // RWOpenFlags_Unclosable could otherwise
-                                // prevent closing the file.
+      // prevent closing the file.
       Close();
     }
   }

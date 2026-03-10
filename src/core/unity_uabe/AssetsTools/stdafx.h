@@ -8,7 +8,9 @@
 //
 // #include <windows.h>
 
+#ifdef _WIN32
 #include <malloc.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>

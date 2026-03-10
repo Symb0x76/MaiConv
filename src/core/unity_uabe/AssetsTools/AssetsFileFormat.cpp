@@ -2190,14 +2190,15 @@ AssetsFile::VerifyAssetsFile(AssetsFileVerifyLogger logger) {
       this->typeTree.unityVersion[0] < '0' ||
       this->typeTree.unityVersion[0] > '9') {
     char sprntTmp2[100];
-    sprintf_s(sprntTmp2, "Invalid version string at %llX",
-              (uint64_t)((uintptr_t)(&this->typeTree.unityVersion[0]) -
-                         (uintptr_t)(&this->header)));
+    snprintf(sprntTmp2, sizeof(sprntTmp2), "Invalid version string at %llX",
+             (uint64_t)((uintptr_t)(&this->typeTree.unityVersion[0]) -
+                        (uintptr_t)(&this->header)));
     errorData = sprntTmp2;
     goto _fileFormatError;
   }
-  sprintf_s(sprntTmp, "INFO: The .assets file was built for Unity %s.",
-            this->typeTree.unityVersion);
+  snprintf(sprntTmp, sizeof(sprntTmp),
+           "INFO: The .assets file was built for Unity %s.",
+           this->typeTree.unityVersion);
   logger(sprntTmp);
 
   if (this->header.format > 0x16 || this->header.format < 0x08)
@@ -2218,9 +2219,8 @@ AssetsFile::VerifyAssetsFile(AssetsFileVerifyLogger logger) {
   if (this->header.format >= 0x0E)
     fileListOffs = ((fileListOffs + 3) & (~0x3)); // align to 4-byte boundary
 
-  allocCount = (uintptr_t)&pFileList
-                   ->fileInfs[fileListSize]; //(fileListSize *
-                                             // sizeof(AssetFileInfo)) + 4 + 4;
+  allocCount = (uintptr_t)&pFileList->fileInfs[fileListSize]; //(fileListSize *
+  // sizeof(AssetFileInfo)) + 4 + 4;
   pFileList = (AssetFileList *)malloc(allocCount);
   if (!pFileList) {
     errorData = (void *)(allocCount);
@@ -2235,9 +2235,9 @@ AssetsFile::VerifyAssetsFile(AssetsFileVerifyLogger logger) {
   fileListSize); goto _readerError;
   }*/
 
-  sprintf_s(sprntTmp,
-            "INFO: The .assets file has %u assets (info list : %u bytes).",
-            pFileList->sizeFiles, pFileList->GetSizeBytes(this->header.format));
+  snprintf(sprntTmp, sizeof(sprntTmp),
+           "INFO: The .assets file has %u assets (info list : %u bytes).",
+           pFileList->sizeFiles, pFileList->GetSizeBytes(this->header.format));
   logger(sprntTmp);
 
   if (pFileList->sizeFiles > 0) {
@@ -2274,24 +2274,26 @@ _cleanup:
 
 _readerError:
   ret = false;
-  sprintf_s(sprntTmp,
-            "ERROR: Invalid .assets file (reading %llu bytes at %p in the "
-            ".assets file failed)!",
-            (unsigned long long)(uintptr_t)errorData2, errorData);
+  snprintf(sprntTmp, sizeof(sprntTmp),
+           "ERROR: Invalid .assets file (reading %llu bytes at %p in the "
+           ".assets file failed)!",
+           (unsigned long long)(uintptr_t)errorData2, errorData);
   logger(sprntTmp);
   goto _cleanup;
 
 _mallocError:
   ret = false;
-  sprintf_s(sprntTmp, "ERROR: Out of Memory : Allocating %llu bytes failed!",
-            (unsigned long long)(uintptr_t)errorData);
+  snprintf(sprntTmp, sizeof(sprntTmp),
+           "ERROR: Out of Memory : Allocating %llu bytes failed!",
+           (unsigned long long)(uintptr_t)errorData);
   logger(sprntTmp);
   goto _cleanup;
 
 _fileFormatError:
   ret = false;
-  sprintf_s(sprntTmp, "ERROR: Invalid .assets file (error message : '%s')!",
-            (const char *)errorData);
+  snprintf(sprntTmp, sizeof(sprntTmp),
+           "ERROR: Invalid .assets file (error message : '%s')!",
+           (const char *)errorData);
   logger(sprntTmp);
   goto _cleanup;
 }

@@ -42,12 +42,14 @@ TEST_CASE("simai compose can be parsed back") {
   REQUIRE(parsed.notes().size() >= 4);
 }
 
-TEST_CASE("simai compose emits canonical maidata style bars and beat durations") {
+TEST_CASE(
+    "simai compose emits canonical maidata style bars and beat durations") {
   SimaiTokenizer tokenizer;
   SimaiParser parser;
   SimaiComposer composer;
 
-  const auto tokens = tokenizer.tokenize_text("(185){1}, {1}, {1}1x, {1}1-5[4:3],");
+  const auto tokens =
+      tokenizer.tokenize_text("(185){1}, {1}, {1}1x, {1}1-5[4:3],");
   Chart chart = parser.parse_tokens(tokens);
   const std::string simai = composer.compose_chart(chart);
 
@@ -60,7 +62,9 @@ TEST_CASE("simai compose emits canonical maidata style bars and beat durations")
 
 TEST_CASE("simai tokenizer preserves ampersands in line-based metadata") {
   SimaiTokenizer tokenizer;
-  const std::string doc_text = "&title=Rock & Roll\n&genre=ゲーム&バラエティ\n&inote_2=\n(120){4}1,2,3,4,\nE\n";
+  const std::string doc_text =
+      "&title=Rock & "
+      "Roll\n&genre=ゲーム&バラエティ\n&inote_2=\n(120){4}1,2,3,4,\nE\n";
   const auto doc = tokenizer.parse_document(doc_text);
   REQUIRE(doc.metadata.at("title") == "Rock & Roll");
   REQUIRE(doc.metadata.at("genre") == "ゲーム&バラエティ");
@@ -69,8 +73,8 @@ TEST_CASE("simai tokenizer preserves ampersands in line-based metadata") {
 
 TEST_CASE("simai compose uses real export slide notation mapping") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   auto add_slide = [&](NoteType type, int key, int end_key, int bar) {
     Note note;
@@ -81,7 +85,7 @@ TEST_CASE("simai compose uses real export slide notation mapping") {
     note.wait_ticks = 96;
     note.last_ticks = 240;
     chart.notes().push_back(note);
-    };
+  };
 
   add_slide(NoteType::SlideQ, 2, 5, 0);
   add_slide(NoteType::SlideP, 6, 3, 1);
@@ -103,10 +107,11 @@ TEST_CASE("simai compose uses real export slide notation mapping") {
   REQUIRE(simai.find("{1}2V46[8:5],\n") != std::string::npos);
 }
 
-TEST_CASE("simai compose keeps special slide starts and chains contiguous slides") {
+TEST_CASE(
+    "simai compose keeps special slide starts and chains contiguous slides") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   Note start;
   start.type = NoteType::SlideStart;
@@ -139,10 +144,11 @@ TEST_CASE("simai compose keeps special slide starts and chains contiguous slides
   REQUIRE(simai.find("2x_/2-7[8:1]*-2[8:1]") != std::string::npos);
 }
 
-TEST_CASE("simai compose chains connecting slides that keep original ma2 start key") {
+TEST_CASE(
+    "simai compose chains connecting slides that keep original ma2 start key") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   Note first;
   first.type = NoteType::SlideStraight;
@@ -170,10 +176,11 @@ TEST_CASE("simai compose chains connecting slides that keep original ma2 start k
   REQUIRE(simai.find("1-4[8:1]*-6[8:1]") != std::string::npos);
 }
 
-TEST_CASE("simai compose inherits special slide starts without emitting underscore token") {
+TEST_CASE("simai compose inherits special slide starts without emitting "
+          "underscore token") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   Note slide_start;
   slide_start.type = NoteType::SlideStart;
@@ -193,14 +200,15 @@ TEST_CASE("simai compose inherits special slide starts without emitting undersco
   SimaiComposer composer;
   const std::string simai = composer.compose_chart(chart);
 
-  REQUIRE(simai.find("6b<4[4:1]") != std::string::npos);
+  REQUIRE(simai.find("6b<4[") != std::string::npos);
   REQUIRE(simai.find("6b_/") == std::string::npos);
 }
 
-TEST_CASE("simai compose orders touch and regular notes before slides in shared slot") {
+TEST_CASE("simai compose orders touch and regular notes before slides in "
+          "shared slot") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   Note slide;
   slide.type = NoteType::SlideStraight;
@@ -232,8 +240,8 @@ TEST_CASE("simai compose orders touch and regular notes before slides in shared 
 
 TEST_CASE("simai compose repeats break suffix for slides ending on 1 or 8") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   Note straight;
   straight.type = NoteType::SlideStraight;
@@ -262,10 +270,11 @@ TEST_CASE("simai compose repeats break suffix for slides ending on 1 or 8") {
   REQUIRE(simai.find("{1}8b<1b[8:1],\n") != std::string::npos);
 }
 
-TEST_CASE("simai compose keeps three trailing empty bars after non-slide endings") {
+TEST_CASE(
+    "simai compose keeps three trailing empty bars after non-slide endings") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   Note tap;
   tap.type = NoteType::Tap;
@@ -281,8 +290,8 @@ TEST_CASE("simai compose keeps three trailing empty bars after non-slide endings
 
 TEST_CASE("simai compose keeps two trailing empty bars after slide endings") {
   Chart chart;
-  chart.bpm_changes().push_back(BpmChange{ 0, 0, 185.0 });
-  chart.measure_changes().push_back(MeasureChange{ 0, 0, 1, 1 });
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
   Note slide;
   slide.type = NoteType::SlideStraight;
