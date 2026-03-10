@@ -881,7 +881,7 @@ namespace maiconv {
         return candidate.state;
       }
       return std::nullopt;
-    };
+      };
 
     const auto has_matching_slide = [&](const Note& candidate) {
       if (candidate.type != NoteType::SlideStart) {
@@ -891,7 +891,7 @@ namespace maiconv {
       return std::any_of(chart.notes().begin(), chart.notes().end(), [&](const Note& note) {
         return is_slide_type(note.type) && note.tick_stamp(def) == stamp && note.key == candidate.key;
         });
-    };
+      };
 
     std::map<int, SlotTokens> tokens_at;
     std::map<std::pair<int, int>, ChainRef> open_slide_chains_by_end;
@@ -901,12 +901,12 @@ namespace maiconv {
     const auto erase_open_chain = [&](int stamp, const ChainRef& ref) {
       open_slide_chains_by_end.erase({ stamp, ref.current_end_key });
       open_slide_chains_by_origin.erase({ stamp, ref.origin_key });
-    };
+      };
 
     const auto store_open_chain = [&](int stamp, const ChainRef& ref) {
       open_slide_chains_by_end[{ stamp, ref.current_end_key }] = ref;
       open_slide_chains_by_origin[{ stamp, ref.origin_key }] = ref;
-    };
+      };
 
     const auto find_open_chain = [&](const Note& note) -> std::optional<ChainRef> {
       const int stamp = note.tick_stamp(def);
@@ -930,7 +930,7 @@ namespace maiconv {
       }
 
       return std::nullopt;
-    };
+      };
     int max_tick = 0;
     int max_note_start_tick = -1;
     bool last_start_has_slide = false;
@@ -1041,7 +1041,7 @@ namespace maiconv {
         notes.push_back(token);
         if (is_slide_type(note.type)) {
           simultaneous_slide_bundles[std::make_tuple(ts, note.key, static_cast<int>(effective_slide_state), note.wait_ticks)] =
-            { ts, notes.size() - 1, note.key, note.end_key };
+          { ts, notes.size() - 1, note.key, note.end_key };
           store_open_chain(ts + note.wait_ticks + note.last_ticks,
             { ts, notes.size() - 1, note.key, note.end_key });
         }

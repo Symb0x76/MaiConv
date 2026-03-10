@@ -6,38 +6,38 @@
 #include <unordered_map>
 
 namespace maiconv {
-namespace {
+  namespace {
 
-std::string lower(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  return value;
-}
+    std::string lower(std::string value) {
+      std::transform(value.begin(), value.end(), value.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      return value;
+    }
 
-}  // namespace
+  }  // namespace
 
-std::optional<ChartFormat> parse_chart_format(const std::string& value) {
-  const std::string normalized = lower(value);
-  static const std::unordered_map<std::string, ChartFormat> kMap = {
-      {"simai", ChartFormat::Simai},
-      {"simai-fes", ChartFormat::SimaiFes},
-      {"simaifes", ChartFormat::SimaiFes},
-      {"maidata", ChartFormat::Maidata},
-      {"ma2", ChartFormat::Ma2_103},
-      {"ma2-103", ChartFormat::Ma2_103},
-      {"ma2_103", ChartFormat::Ma2_103},
-      {"ma2-104", ChartFormat::Ma2_104},
-      {"ma2_104", ChartFormat::Ma2_104},
-  };
-  const auto it = kMap.find(normalized);
-  if (it == kMap.end()) {
-    return std::nullopt;
+  std::optional<ChartFormat> parse_chart_format(const std::string& value) {
+    const std::string normalized = lower(value);
+    static const std::unordered_map<std::string, ChartFormat> kMap = {
+        {"simai", ChartFormat::Simai},
+        {"simai-fes", ChartFormat::SimaiFes},
+        {"simaifes", ChartFormat::SimaiFes},
+        {"maidata", ChartFormat::Maidata},
+        {"ma2", ChartFormat::Ma2_103},
+        {"ma2-103", ChartFormat::Ma2_103},
+        {"ma2_103", ChartFormat::Ma2_103},
+        {"ma2-104", ChartFormat::Ma2_104},
+        {"ma2_104", ChartFormat::Ma2_104},
+    };
+    const auto it = kMap.find(normalized);
+    if (it == kMap.end()) {
+      return std::nullopt;
+    }
+    return it->second;
   }
-  return it->second;
-}
 
-std::string to_string(ChartFormat format) {
-  switch (format) {
+  std::string to_string(ChartFormat format) {
+    switch (format) {
     case ChartFormat::Simai:
       return "simai";
     case ChartFormat::SimaiFes:
@@ -48,29 +48,29 @@ std::string to_string(ChartFormat format) {
       return "ma2-103";
     case ChartFormat::Ma2_104:
       return "ma2-104";
+    }
+    return "simai";
   }
-  return "simai";
-}
 
-std::optional<FlipMethod> parse_flip_method(const std::string& value) {
-  const std::string normalized = lower(value);
-  static const std::unordered_map<std::string, FlipMethod> kMap = {
-      {"upsidedown", FlipMethod::UpSideDown},
-      {"clockwise90", FlipMethod::Clockwise90},
-      {"clockwise180", FlipMethod::Clockwise180},
-      {"counterclockwise90", FlipMethod::Counterclockwise90},
-      {"counterclockwise180", FlipMethod::Counterclockwise180},
-      {"lefttoright", FlipMethod::LeftToRight},
-  };
-  const auto it = kMap.find(normalized);
-  if (it == kMap.end()) {
-    return std::nullopt;
+  std::optional<FlipMethod> parse_flip_method(const std::string& value) {
+    const std::string normalized = lower(value);
+    static const std::unordered_map<std::string, FlipMethod> kMap = {
+        {"upsidedown", FlipMethod::UpSideDown},
+        {"clockwise90", FlipMethod::Clockwise90},
+        {"clockwise180", FlipMethod::Clockwise180},
+        {"counterclockwise90", FlipMethod::Counterclockwise90},
+        {"counterclockwise180", FlipMethod::Counterclockwise180},
+        {"lefttoright", FlipMethod::LeftToRight},
+    };
+    const auto it = kMap.find(normalized);
+    if (it == kMap.end()) {
+      return std::nullopt;
+    }
+    return it->second;
   }
-  return it->second;
-}
 
-std::string to_string(FlipMethod method) {
-  switch (method) {
+  std::string to_string(FlipMethod method) {
+    switch (method) {
     case FlipMethod::UpSideDown:
       return "UpSideDown";
     case FlipMethod::Clockwise90:
@@ -83,12 +83,12 @@ std::string to_string(FlipMethod method) {
       return "Counterclockwise180";
     case FlipMethod::LeftToRight:
       return "LeftToRight";
+    }
+    return "UpSideDown";
   }
-  return "UpSideDown";
-}
 
-bool is_slide_type(NoteType type) {
-  switch (type) {
+  bool is_slide_type(NoteType type) {
+    switch (type) {
     case NoteType::SlideStraight:
     case NoteType::SlideCurveLeft:
     case NoteType::SlideCurveRight:
@@ -105,7 +105,7 @@ bool is_slide_type(NoteType type) {
       return true;
     default:
       return false;
+    }
   }
-}
 
 }  // namespace maiconv

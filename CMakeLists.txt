@@ -6,6 +6,8 @@ option(MAICONV_ENABLE_UBSAN "Enable undefined behavior sanitizer" OFF)
 option(MAICONV_BUILD_TESTS "Build tests" ON)
 option(MAICONV_USE_CCACHE "Auto-detect and use ccache compiler launcher" ON)
 
+include(FetchContent)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -75,10 +77,6 @@ maiconv_ensure_submodule("third_party/CLI11" "third_party/CLI11/CMakeLists.txt")
 maiconv_ensure_submodule("third_party/tinyxml2" "third_party/tinyxml2/CMakeLists.txt")
 maiconv_ensure_submodule("third_party/vgmstream" "third_party/vgmstream/CMakeLists.txt")
 maiconv_ensure_submodule("third_party/shine" "third_party/shine/src/lib/layer3.h")
-maiconv_ensure_submodule("third_party/minimp4" "third_party/minimp4/minimp4.h")
-if(MAICONV_BUILD_TESTS)
-    maiconv_ensure_submodule("third_party/Catch2" "third_party/Catch2/CMakeLists.txt")
-endif()
 
 set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
@@ -86,14 +84,21 @@ add_subdirectory(third_party/CLI11 EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/tinyxml2 EXCLUDE_FROM_ALL)
 
 if(MAICONV_BUILD_TESTS)
-    add_subdirectory(third_party/Catch2 EXCLUDE_FROM_ALL)
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Catch2/extras")
+    set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+    set(CATCH_INSTALL_EXTRAS ON CACHE BOOL "" FORCE)
+    set(CATCH_DEVELOPMENT_BUILD OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.7.1
+    )
+    FetchContent_MakeAvailable(catch2)
+    list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 endif()
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/third_party/vgmstream/src
     ${CMAKE_SOURCE_DIR}/third_party/shine/src/lib
-    ${CMAKE_SOURCE_DIR}/third_party/minimp4
 )
 
 set(BUILD_CLI OFF CACHE BOOL "" FORCE)
@@ -123,39 +128,37 @@ add_library(shine STATIC ${SHINE_SOURCES})
 target_include_directories(shine PUBLIC third_party/shine/src/lib)
 
 add_library(maiconv_uabe_libCompression STATIC
-    third_party/UABE/libCompression/lz4.c
-    third_party/UABE/libCompression/lz4frame.c
-    third_party/UABE/libCompression/lz4hc.c
-    third_party/UABE/libCompression/xxhash.c
-    third_party/UABE/libCompression/lz4dec.cpp
-    third_party/UABE/libCompression/lz4enc.cpp
-    third_party/UABE/libCompression/LzFind.c
-    third_party/UABE/libCompression/LzFindMt.c
-    third_party/UABE/libCompression/LzmaDec.c
-    third_party/UABE/libCompression/LzmaEnc.c
-    third_party/UABE/libCompression/Threads.c
+    src/core/unity_uabe/libCompression/lz4.c
+    src/core/unity_uabe/libCompression/lz4frame.c
+    src/core/unity_uabe/libCompression/lz4hc.c
+    src/core/unity_uabe/libCompression/xxhash.c
+    src/core/unity_uabe/libCompression/lz4dec.cpp
+    src/core/unity_uabe/libCompression/lz4enc.cpp
+    src/core/unity_uabe/libCompression/LzFind.c
+    src/core/unity_uabe/libCompression/LzFindMt.c
+    src/core/unity_uabe/libCompression/LzmaDec.c
+    src/core/unity_uabe/libCompression/LzmaEnc.c
+    src/core/unity_uabe/libCompression/Threads.c
 )
-target_include_directories(maiconv_uabe_libCompression PUBLIC third_party/UABE/libCompression)
+target_include_directories(maiconv_uabe_libCompression PUBLIC src/core/unity_uabe/libCompression)
 
 add_library(maiconv_uabe_libStringConverter STATIC
-    third_party/UABE/libStringConverter/convert.cpp
+    src/core/unity_uabe/libStringConverter/convert.cpp
 )
-target_include_directories(maiconv_uabe_libStringConverter PUBLIC third_party/UABE/libStringConverter)
+target_include_directories(maiconv_uabe_libStringConverter PUBLIC src/core/unity_uabe/libStringConverter)
 
 add_library(maiconv_uabe_assetstools STATIC
-    third_party/UABE/AssetsTools/AssetBundleFileFormat.cpp
-    third_party/UABE/AssetsTools/AssetBundleFileTable.cpp
-    third_party/UABE/AssetsTools/AssetsFileFormat.cpp
-    third_party/UABE/AssetsTools/AssetsFileReader.cpp
-    third_party/UABE/AssetsTools/AssetsFileTable.cpp
-    third_party/UABE/AssetsTools/AssetsReplacer.cpp
-    third_party/UABE/AssetsTools/AssetTypeClass.cpp
-    third_party/UABE/AssetsTools/BundleReplacer.cpp
-    third_party/UABE/AssetsTools/ClassDatabaseFile.cpp
-    third_party/UABE/AssetsTools/EngineVersion.cpp
-    third_party/UABE/AssetsTools/ResourceManagerFile.cpp
+    src/core/unity_uabe/AssetsTools/AssetBundleFileFormat.cpp
+    src/core/unity_uabe/AssetsTools/AssetBundleFileTable.cpp
+    src/core/unity_uabe/AssetsTools/AssetsFileFormat.cpp
+    src/core/unity_uabe/AssetsTools/AssetsFileReader.cpp
+    src/core/unity_uabe/AssetsTools/AssetsFileTable.cpp
+    src/core/unity_uabe/AssetsTools/AssetsReplacer.cpp
+    src/core/unity_uabe/AssetsTools/AssetTypeClass.cpp
+    src/core/unity_uabe/AssetsTools/BundleReplacer.cpp
+    src/core/unity_uabe/AssetsTools/ClassDatabaseFile.cpp
 )
-target_include_directories(maiconv_uabe_assetstools PUBLIC third_party/UABE/AssetsTools)
+target_include_directories(maiconv_uabe_assetstools PUBLIC src/core/unity_uabe/AssetsTools)
 target_compile_definitions(maiconv_uabe_assetstools PUBLIC
     ASSETSTOOLS_IMPORTSTATIC
     UNICODE
@@ -174,19 +177,17 @@ add_library(MaiConv_core
     src/core/ma2.cpp
     src/core/media.cpp
     src/core/unity_assetbundle.cpp
-    src/core/minimp4_impl.c
     src/core/simai.cpp
     src/core/assets.cpp
-    third_party/UABE/Plugins/Texture/lodepng.cpp
+    src/core/unity_uabe/Texture/lodepng.cpp
 )
 
 target_include_directories(MaiConv_core PUBLIC include)
 target_include_directories(MaiConv_core PRIVATE
     third_party/vgmstream/src
     third_party/shine/src/lib
-    third_party/minimp4
-    third_party/UABE/AssetsTools
-    third_party/UABE/Plugins/Texture
+    src/core/unity_uabe/AssetsTools
+    src/core/unity_uabe/Texture
 )
 target_compile_definitions(MaiConv_core PRIVATE
     MAICONV_SOURCE_DIR="${CMAKE_SOURCE_DIR}"

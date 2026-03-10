@@ -81,7 +81,7 @@ TEST_CASE("simai compose uses real export slide notation mapping") {
     note.wait_ticks = 96;
     note.last_ticks = 240;
     chart.notes().push_back(note);
-  };
+    };
 
   add_slide(NoteType::SlideQ, 2, 5, 0);
   add_slide(NoteType::SlideP, 6, 3, 1);

@@ -10,7 +10,7 @@ Cross-platform C++ reimplementation of [MaichartConverter](https://github.com/Ne
 
 ## Features
 
-- C++20 + CMake + git submodule (third_party)
+- C++20 + CMake + git submodule (runtime deps in third_party, Catch2 via FetchContent for tests)
 - CLI subcommands:
   - `maiconv ma2`
   - `maiconv simai`
@@ -22,8 +22,9 @@ Cross-platform C++ reimplementation of [MaichartConverter](https://github.com/Ne
 
 ## Dependency Layout
 
-- `third_party/*`: all third-party dependencies are managed by git submodules.
-- Current submodules: `CLI11`, `Catch2`, `tinyxml2`, `vgmstream`, `shine`, `minimp4`, `UABE`.
+- `third_party/*`: runtime third-party dependencies are managed by git submodules.
+- Test dependency `Catch2` is fetched by CMake FetchContent when `MAICONV_BUILD_TESTS=ON`.
+- Current submodules: `CLI11`, `tinyxml2`, `vgmstream`, `shine`.
 
 ## Build
 
@@ -33,6 +34,33 @@ cmake --preset default
 cmake --build --preset default
 ctest --preset default
 ```
+
+## FFmpeg Dependency Details
+
+Video-related `maiconv media` features require a system `ffmpeg` executable available in `PATH`.
+
+Required capabilities by feature:
+- `dat/usm -> mp4`: requires `libx264` encoder (MaiConv transcodes VP9 IVF into H.264 MP4)
+- `mp4 -> dat` (both template and template-free paths): requires `libvpx-vp9` encoder (MaiConv first transcodes to VP9 IVF)
+
+Recommended:
+- `ffprobe` (useful for manual stream diagnostics; not a hard runtime requirement for MaiConv)
+
+Quick checks (Windows PowerShell):
+
+```powershell
+ffmpeg -version
+ffmpeg -hide_banner -encoders | Select-String "libx264|libvpx-vp9"
+```
+
+Quick checks (Linux/macOS):
+
+```bash
+ffmpeg -version
+ffmpeg -hide_banner -encoders | grep -E "libx264|libvpx-vp9"
+```
+
+If encoders are missing, install an ffmpeg build that includes both `libx264` and `libvpx`.
 
 ## CLI
 
@@ -95,6 +123,12 @@ Convert ACB+AWB to MP3:
 maiconv media audio --acb /path/to/music001944.acb --awb /path/to/music001944.awb --output ./track.mp3
 ```
 
+Pack MP3 into ACB+AWB:
+
+```bash
+maiconv media audio --input /path/to/track.mp3 --output-acb ./track.acb --output-awb ./track.awb
+```
+
 Convert jacket AB to PNG:
 
 ```bash
@@ -105,6 +139,18 @@ Convert DAT/USM to MP4:
 
 ```bash
 maiconv media video --input /path/to/001944.dat --output ./pv.mp4
+```
+
+Convert MP4 to DAT (template DAT/USM required):
+
+```bash
+maiconv media video --input /path/to/pv.mp4 --template /path/to/template_pv.dat --output ./pv.dat
+```
+
+Convert MP4 to DAT directly (no template, built-in C++ path):
+
+```bash
+maiconv media video --input /path/to/pv.mp4 --output ./pv.dat
 ```
 
 ## Asset Naming Compatibility
@@ -142,8 +188,12 @@ When source media is in original game formats, `assets` converts them as follows
 - `acb + awb -> track.mp3` (built-in `libvgmstream` + `shine`)
 - `ab -> bg.png` (embedded PNG extraction)
 - `dat/usm -> pv.mp4`
-  - H.264 stream: built-in USM parser + MP4 mux
-  - VP9 stream: VP9->H.264 transcode via `ffmpeg` in `PATH`
+  - VP9-only path; VP9->H.264 transcode via `ffmpeg` in `PATH`
+- `mp4 + template(dat/usm) -> pv.dat`
+  - transcodes to VP9 IVF first, then writes back into template DAT/USM packet layout using inverse encryption
+- `mp4 -> pv.dat` (template-free)
+  - transcodes to VP9 IVF first, then uses MaiConv's built-in C++ packer to emit DAT (`@SFV` packets + compatible encryption)
+  - this mode only requires `ffmpeg` with `libvpx-vp9` encoder support
 
 If conversion fails, raw assets are **not** preserved. The song is marked as `_Incomplete` (or the command fails without `--ignore`), and failed source/target paths are written to `_log.txt`.
 

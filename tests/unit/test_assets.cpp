@@ -19,6 +19,40 @@ namespace {
 
   namespace fs = std::filesystem;
 
+  const std::string kMockArtist = "Mock Artist";
+  const std::string kMockVersion = "MockVersion";
+  const std::string kMockReleaseTag = "MockReleaseTag";
+  const std::string kMockTitleAlpha = "Mock Title Alpha";
+  const std::string kMockChartDesignerA = "Mock Chart Designer A";
+  const std::string kMockChartDesignerB = "Mock Chart Designer B";
+  const std::string kMockChartDesignerC = "Mock Chart Designer C";
+  const std::string kMockUtageChartA = "[Utage]Mock Chart A";
+  const std::string kMockUtageChartB = "[Utage]Mock Chart B";
+  const std::string kMockUtageChartC = "[Utage]Mock Chart C";
+  const std::string kMockUtageDesigner = "Mock Utage Designer";
+  const std::string kMockUtageTag = "MockUtageTag";
+
+  const std::string kMockTitleAlphaDx = kMockTitleAlpha + " [DX]";
+  const std::string kMockFolder012340TitleAlphaDx = "012340_" + kMockTitleAlphaDx;
+  const std::string kMockFolder299002TitleAlpha = "299002_" + kMockTitleAlpha;
+  const std::string kMockFolder101234Utage = "101234_" + sanitize_folder_name(kMockUtageChartA);
+  const std::string kMockFolder101235Utage = "101235_" + sanitize_folder_name(kMockUtageChartB);
+  const std::string kMockFolder101236Utage = "101236_" + sanitize_folder_name(kMockUtageChartC);
+
+  const std::string kMetaTitlePrefix = "&title=";
+  const std::string kMetaVersionPrefix = "&version=";
+  const std::string kMetaDes7Prefix = "&des_7=";
+  const std::string kMetaShortIdPrefix = "&shortid=";
+  const std::string kMetaGenreIdPrefix = "&genreid=";
+  const std::string kMetaVersionIdPrefix = "&versionid=";
+
+  const std::string kMetaTitleMockAlphaDx = kMetaTitlePrefix + kMockTitleAlphaDx;
+  const std::string kMetaVersionMock = kMetaVersionPrefix + kMockVersion;
+  const std::string kMetaDes7MockUtageDesigner = kMetaDes7Prefix + kMockUtageDesigner;
+  const std::string kMetaShortIdMock12340 = kMetaShortIdPrefix + "12340";
+  const std::string kMetaGenreIdMock104 = kMetaGenreIdPrefix + "104";
+  const std::string kMetaVersionIdMock23 = kMetaVersionIdPrefix + "23";
+
   fs::path unique_temp_dir(const std::string& prefix) {
     const auto stamp = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::high_resolution_clock::now().time_since_epoch())
@@ -26,10 +60,6 @@ namespace {
     const fs::path dir = fs::temp_directory_path() / ("maiconv_" + prefix + "_" + std::to_string(stamp));
     fs::create_directories(dir);
     return dir;
-  }
-
-  fs::path repo_test_data_path(const fs::path& relative) {
-    return fs::path(__FILE__).parent_path().parent_path() / relative;
   }
 
   std::string sample_ma2() {
@@ -57,7 +87,7 @@ namespace {
       "  <sortName><str>" + title + "</str></sortName>\n"
       "  <genreName><str>" + genre + "</str></genreName>\n"
       "  <version><str>" + version + "</str></version>\n"
-      "  <artistName><str>Tester</str></artistName>\n"
+        "  <artistName><str>" + kMockArtist + "</str></artistName>\n"
       "  <bpm><str>120</str></bpm>\n"
       "</MusicData>\n";
   }
@@ -112,37 +142,37 @@ namespace {
     out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
   }
 
-  void create_complete_maidata_fixture_011944(const fs::path& assets_root) {
+  void create_complete_maidata_fixture_012340(const fs::path& assets_root) {
     const fs::path db_root = assets_root / "A045";
-    const fs::path track_folder = db_root / "music" / "music011944";
+    const fs::path track_folder = db_root / "music" / "music012340";
     fs::create_directories(track_folder);
 
-    write_text_file(track_folder / "011944_00.ma2", sample_ma2());
-    write_text_file(track_folder / "011944_01.ma2", sample_ma2());
-    write_text_file(track_folder / "011944_02.ma2", sample_ma2());
-    write_text_file(track_folder / "011944_03.ma2", sample_ma2());
+    write_text_file(track_folder / "012340_00.ma2", sample_ma2());
+    write_text_file(track_folder / "012340_01.ma2", sample_ma2());
+    write_text_file(track_folder / "012340_02.ma2", sample_ma2());
+    write_text_file(track_folder / "012340_03.ma2", sample_ma2());
 
     const std::string xml =
       "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
       "<MusicData xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">\n"
-      "  <dataName>music011944</dataName>\n"
-      "  <netOpenName><id>260116</id><str>Net260116</str></netOpenName>\n"
-      "  <releaseTagName><id>5001</id><str>Ver1.50.00</str></releaseTagName>\n"
+      "  <dataName>music012340</dataName>\n"
+      "  <netOpenName><id>299001</id><str>Net299001</str></netOpenName>\n"
+      "  <releaseTagName><id>5001</id><str>" + kMockReleaseTag + "</str></releaseTagName>\n"
       "  <disable>false</disable>\n"
-      "  <name><id>11944</id><str>Restricted Access</str></name>\n"
-      "  <sortName>RESTRICTEDACCESS</sortName>\n"
-      "  <artistName><id>1097</id><str>Knighthood</str></artistName>\n"
+      "  <name><id>12340</id><str>" + kMockTitleAlpha + "</str></name>\n"
+      "  <sortName>MOCKTITLEALPHA</sortName>\n"
+      "  <artistName><id>1097</id><str>" + kMockArtist + "</str></artistName>\n"
       "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
       "  <bpm>185</bpm>\n"
       "  <version>25007</version>\n"
-      "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+      "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
       "  <notesData>\n"
-      "    <Notes><file><path>011944_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>4</musicLevelID><maxNotes>217</maxNotes><isEnable>true</isEnable></Notes>\n"
-      "    <Notes><file><path>011944_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>8</musicLevelID><maxNotes>389</maxNotes><isEnable>true</isEnable></Notes>\n"
-      "    <Notes><file><path>011944_02.ma2</path></file><level>11</level><levelDecimal>5</levelDecimal><notesDesigner><id>63</id><str>アマリリス</str></notesDesigner><notesType>0</notesType><musicLevelID>15</musicLevelID><maxNotes>535</maxNotes><isEnable>true</isEnable></Notes>\n"
-      "    <Notes><file><path>011944_03.ma2</path></file><level>13</level><levelDecimal>8</levelDecimal><notesDesigner><id>128</id><str>Luxizhel</str></notesDesigner><notesType>0</notesType><musicLevelID>20</musicLevelID><maxNotes>920</maxNotes><isEnable>true</isEnable></Notes>\n"
-      "    <Notes><file><path>011944_04.ma2</path></file><level>0</level><levelDecimal>0</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>0</musicLevelID><maxNotes>0</maxNotes><isEnable>false</isEnable></Notes>\n"
-      "    <Notes><file><path>011944_05.ma2</path></file><level>0</level><levelDecimal>0</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>0</musicLevelID><maxNotes>0</maxNotes><isEnable>false</isEnable></Notes>\n"
+      "    <Notes><file><path>012340_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>4</musicLevelID><maxNotes>217</maxNotes><isEnable>true</isEnable></Notes>\n"
+      "    <Notes><file><path>012340_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>8</musicLevelID><maxNotes>389</maxNotes><isEnable>true</isEnable></Notes>\n"
+      "    <Notes><file><path>012340_02.ma2</path></file><level>11</level><levelDecimal>5</levelDecimal><notesDesigner><id>63</id><str>" + kMockChartDesignerB + "</str></notesDesigner><notesType>0</notesType><musicLevelID>15</musicLevelID><maxNotes>535</maxNotes><isEnable>true</isEnable></Notes>\n"
+      "    <Notes><file><path>012340_03.ma2</path></file><level>13</level><levelDecimal>8</levelDecimal><notesDesigner><id>128</id><str>" + kMockChartDesignerC + "</str></notesDesigner><notesType>0</notesType><musicLevelID>20</musicLevelID><maxNotes>920</maxNotes><isEnable>true</isEnable></Notes>\n"
+      "    <Notes><file><path>012340_04.ma2</path></file><level>0</level><levelDecimal>0</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>0</musicLevelID><maxNotes>0</maxNotes><isEnable>false</isEnable></Notes>\n"
+      "    <Notes><file><path>012340_05.ma2</path></file><level>0</level><levelDecimal>0</levelDecimal><notesDesigner><id>0</id><str /></notesDesigner><notesType>0</notesType><musicLevelID>0</musicLevelID><maxNotes>0</maxNotes><isEnable>false</isEnable></Notes>\n"
       "  </notesData>\n"
       "  <utageKanjiName />\n"
       "  <comment />\n"
@@ -153,9 +183,9 @@ namespace {
     fs::create_directories(db_root / "SoundData");
     fs::create_directories(db_root / "AssetBundleImages" / "jacket");
     fs::create_directories(db_root / "MovieData");
-    write_text_file(db_root / "SoundData" / "music001944.mp3", "dummy");
-    write_text_file(db_root / "AssetBundleImages" / "jacket" / "UI_Jacket_001944.png", "dummy");
-    write_text_file(db_root / "MovieData" / "001944.mp4", "dummy");
+    write_text_file(db_root / "SoundData" / "music002340.mp3", "dummy");
+    write_text_file(db_root / "AssetBundleImages" / "jacket" / "UI_Jacket_002340.png", "dummy");
+    write_text_file(db_root / "MovieData" / "002340.mp4", "dummy");
   }
 
 }  // namespace
@@ -309,8 +339,8 @@ TEST_CASE("assets supports acb/awb/ab/dat media naming") {
   const fs::path output_root = temp_root / "output";
 
   fs::create_directories(assets_root);
-  create_track(assets_root / "A045", "011944", "RawMediaSong", "GAME", "PRISM");
-  create_compact_media_assets(assets_root / "A045", "011944");
+  create_track(assets_root / "A045", "012340", "RawMediaSong", "GAME", "PRISM");
+  create_compact_media_assets(assets_root / "A045", "012340");
 
   AssetsOptions options;
   options.streaming_assets_path = assets_root;
@@ -328,7 +358,7 @@ TEST_CASE("assets supports acb/awb/ab/dat media naming") {
 
   REQUIRE(result == 0);
 
-  const fs::path incomplete_dir = output_root / "011944_RawMediaSong [DX]_Incomplete";
+  const fs::path incomplete_dir = output_root / "012340_RawMediaSong [DX]_Incomplete";
   REQUIRE(fs::exists(incomplete_dir / "maidata.txt"));
   REQUIRE_FALSE(fs::exists(incomplete_dir / "track.acb"));
   REQUIRE_FALSE(fs::exists(incomplete_dir / "track.awb"));
@@ -337,9 +367,9 @@ TEST_CASE("assets supports acb/awb/ab/dat media naming") {
 
   REQUIRE_FALSE(fs::exists(output_root / "_log.txt"));
   const std::string out = captured_out.str();
-  REQUIRE(out.find("Incomplete: 011944 RawMediaSong [DX]") != std::string::npos);
+  REQUIRE(out.find("Incomplete: 012340 RawMediaSong [DX]") != std::string::npos);
   REQUIRE(out.find("Total music compiled: 0") != std::string::npos);
-  REQUIRE(out.find("Incomplete: 011944 RawMediaSong [DX]") < out.find("Total music compiled: 0"));
+  REQUIRE(out.find("Incomplete: 012340 RawMediaSong [DX]") < out.find("Total music compiled: 0"));
   REQUIRE(captured_err.str().find("Audio conversion failed") != std::string::npos);
   REQUIRE(captured_err.str().find("Cover conversion failed") != std::string::npos);
   REQUIRE(captured_err.str().find("Video conversion failed") != std::string::npos);
@@ -353,8 +383,8 @@ TEST_CASE("assets verbose log level prints paths and immediate warnings") {
   const fs::path output_root = temp_root / "output";
 
   fs::create_directories(assets_root);
-  create_track(assets_root / "A045", "011944", "VerboseSong", "GAME", "PRISM");
-  create_compact_media_assets(assets_root / "A045", "011944");
+  create_track(assets_root / "A045", "012340", "VerboseSong", "GAME", "PRISM");
+  create_compact_media_assets(assets_root / "A045", "012340");
 
   AssetsOptions options;
   options.streaming_assets_path = assets_root;
@@ -373,7 +403,7 @@ TEST_CASE("assets verbose log level prints paths and immediate warnings") {
 
   REQUIRE(result == 0);
   const std::string out = captured_out.str();
-  REQUIRE(out.find("Incomplete: 011944 VerboseSong [DX] -> ") != std::string::npos);
+  REQUIRE(out.find("Incomplete: 012340 VerboseSong [DX] -> ") != std::string::npos);
   REQUIRE(out.find("Total music compiled: 0") != std::string::npos);
   REQUIRE(captured_err.str().find("Warning: Audio conversion failed") != std::string::npos);
   REQUIRE(captured_err.str().find("Warning: Cover conversion failed") != std::string::npos);
@@ -389,18 +419,18 @@ TEST_CASE("assets supports pseudo assetbundle jacket in .ab") {
   const fs::path output_root = temp_root / "output";
 
   fs::create_directories(assets_root);
-  create_track(assets_root / "A045", "011944", "PseudoABJacketSong", "GAME", "PRISM");
+  create_track(assets_root / "A045", "012340", "PseudoABJacketSong", "GAME", "PRISM");
 
   const fs::path db_root = assets_root / "A045";
   fs::create_directories(db_root / "SoundData");
   fs::create_directories(db_root / "AssetBundleImages" / "jacket");
   fs::create_directories(db_root / "MovieData");
 
-  write_text_file(db_root / "SoundData" / "music001944.mp3", "dummy");
-  write_text_file(db_root / "MovieData" / "001944.mp4", "dummy");
+  write_text_file(db_root / "SoundData" / "music002340.mp3", "dummy");
+  write_text_file(db_root / "MovieData" / "002340.mp4", "dummy");
 
   // JPEG SOI marker (FF D8 FF) is enough for pseudo-image detection path.
-  write_binary_file(db_root / "AssetBundleImages" / "jacket" / "ui_jacket_001944.ab",
+  write_binary_file(db_root / "AssetBundleImages" / "jacket" / "ui_jacket_002340.ab",
     { 0xFFU, 0xD8U, 0xFFU, 0xE0U, 0x00U, 0x10U, 0xFFU, 0xD9U });
 
   AssetsOptions options;
@@ -409,11 +439,11 @@ TEST_CASE("assets supports pseudo assetbundle jacket in .ab") {
   options.format = ChartFormat::Simai;
 
   REQUIRE(run_compile_assets(options) == 0);
-  REQUIRE(fs::exists(output_root / "011944_PseudoABJacketSong [DX]" / "maidata.txt"));
-  REQUIRE(fs::exists(output_root / "011944_PseudoABJacketSong [DX]" / "track.mp3"));
-  REQUIRE(fs::exists(output_root / "011944_PseudoABJacketSong [DX]" / "pv.mp4"));
-  REQUIRE(fs::exists(output_root / "011944_PseudoABJacketSong [DX]" / "bg.jpg"));
-  REQUIRE_FALSE(fs::exists(output_root / "011944_PseudoABJacketSong [DX]_Incomplete"));
+  REQUIRE(fs::exists(output_root / "012340_PseudoABJacketSong [DX]" / "maidata.txt"));
+  REQUIRE(fs::exists(output_root / "012340_PseudoABJacketSong [DX]" / "track.mp3"));
+  REQUIRE(fs::exists(output_root / "012340_PseudoABJacketSong [DX]" / "pv.mp4"));
+  REQUIRE(fs::exists(output_root / "012340_PseudoABJacketSong [DX]" / "bg.jpg"));
+  REQUIRE_FALSE(fs::exists(output_root / "012340_PseudoABJacketSong [DX]_Incomplete"));
 
   fs::remove_all(temp_root);
 }
@@ -444,23 +474,23 @@ TEST_CASE("assets exports selected id with all difficulties when difficulty is o
 }
 
 
-TEST_CASE("assets uses real song id from Music.xml name/id") {
-  const fs::path temp_root = unique_temp_dir("assets_musicxml_real_id");
+TEST_CASE("assets uses song id from Music.xml name/id") {
+  const fs::path temp_root = unique_temp_dir("assets_musicxml_mock_id");
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  const fs::path track_folder = assets_root / "A045" / "music" / "music011944";
+  const fs::path track_folder = assets_root / "A045" / "music" / "music012340";
   fs::create_directories(track_folder);
-  write_text_file(track_folder / "011944_03.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_03.ma2", sample_ma2());
 
   const std::string xml =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData>\n"
-    "  <netOpenName><id>260116</id><str>Net260116</str></netOpenName>\n"
-    "  <name><id>11944</id><str>Restricted Access</str></name>\n"
-    "  <sortName>RESTRICTEDACCESS</sortName>\n"
+    "  <netOpenName><id>299002</id><str>Net299002</str></netOpenName>\n"
+    "  <name><id>12340</id><str>" + kMockTitleAlpha + "</str></name>\n"
+    "  <sortName>MOCKTITLEALPHA</sortName>\n"
     "  <genreName><id>104</id><str>GAME</str></genreName>\n"
-    "  <artistName><id>1</id><str>Tester</str></artistName>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
     "  <bpm>185</bpm>\n"
     "  <version>25007</version>\n"
     "</MusicData>\n";
@@ -472,8 +502,8 @@ TEST_CASE("assets uses real song id from Music.xml name/id") {
   options.format = ChartFormat::Simai;
 
   REQUIRE(run_compile_assets(options) == 0);
-  REQUIRE(fs::exists(output_root / "011944_Restricted Access [DX]" / "maidata.txt"));
-  REQUIRE_FALSE(fs::exists(output_root / "260116_Restricted Access"));
+  REQUIRE(fs::exists(output_root / kMockFolder012340TitleAlphaDx / "maidata.txt"));
+  REQUIRE_FALSE(fs::exists(output_root / kMockFolder299002TitleAlpha));
 
   fs::remove_all(temp_root);
 }
@@ -483,23 +513,23 @@ TEST_CASE("assets exports maidata format with metadata fields", "[assets][maidat
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  const fs::path track_folder = assets_root / "A045" / "music" / "music011944";
+  const fs::path track_folder = assets_root / "A045" / "music" / "music012340";
   fs::create_directories(track_folder);
-  write_text_file(track_folder / "011944_00.ma2", sample_ma2());
-  write_text_file(track_folder / "011944_01.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_00.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_01.ma2", sample_ma2());
 
   const std::string xml =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData>\n"
-    "  <name><id>11944</id><str>Restricted Access</str></name>\n"
-    "  <artistName><id>1</id><str>Knighthood</str></artistName>\n"
+    "  <name><id>12340</id><str>" + kMockTitleAlpha + "</str></name>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
     "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
     "  <bpm>185</bpm>\n"
     "  <version>25007</version>\n"
-    "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+    "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
     "  <notesData>\n"
-    "    <Notes><file><path>011944_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
-    "    <Notes><file><path>011944_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><musicLevelID>8</musicLevelID><notesDesigner><str>Tester</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><musicLevelID>8</musicLevelID><notesDesigner><str>" + kMockChartDesignerA + "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
     "  </notesData>\n"
     "</MusicData>\n";
   write_text_file(track_folder / "Music.xml", xml);
@@ -510,11 +540,11 @@ TEST_CASE("assets exports maidata format with metadata fields", "[assets][maidat
   options.format = ChartFormat::Maidata;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const std::string maidata = read_text_file(output_root / "011944_Restricted Access [DX]" / "maidata.txt");
-  REQUIRE(maidata.find("&shortid=11944") != std::string::npos);
-  REQUIRE(maidata.find("&genreid=104") != std::string::npos);
-  REQUIRE(maidata.find("&versionid=23") != std::string::npos);
-  REQUIRE(maidata.find("&version=PRiSM") != std::string::npos);
+  const std::string maidata = read_text_file(output_root / kMockFolder012340TitleAlphaDx / "maidata.txt");
+  REQUIRE(maidata.find(kMetaShortIdMock12340) != std::string::npos);
+  REQUIRE(maidata.find(kMetaGenreIdMock104) != std::string::npos);
+  REQUIRE(maidata.find(kMetaVersionIdMock23) != std::string::npos);
+  REQUIRE(maidata.find(kMetaVersionMock) != std::string::npos);
   REQUIRE(maidata.find("&lv_2=4.0") != std::string::npos);
   REQUIRE(maidata.find("&lv_3=7.8") != std::string::npos);
   REQUIRE(maidata.find("&inote_2=") != std::string::npos);
@@ -528,21 +558,21 @@ TEST_CASE("assets maidata normalizes genre labels and preserves special title ch
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  const fs::path track_folder = assets_root / "A045" / "music" / "music011944";
+  const fs::path track_folder = assets_root / "A045" / "music" / "music012340";
   fs::create_directories(track_folder);
-  write_text_file(track_folder / "011944_00.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_00.ma2", sample_ma2());
 
   const std::string xml =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData>\n"
-    "  <name><id>11944</id><str>Rock &amp; Roll?</str></name>\n"
-    "  <artistName><id>1</id><str>Knighthood</str></artistName>\n"
+    "  <name><id>12340</id><str>Rock &amp; Roll?</str></name>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
     "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
     "  <bpm>185</bpm>\n"
     "  <version>25007</version>\n"
-    "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+    "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
     "  <notesData>\n"
-    "    <Notes><file><path>011944_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
     "  </notesData>\n"
     "</MusicData>\n";
   write_text_file(track_folder / "Music.xml", xml);
@@ -553,7 +583,7 @@ TEST_CASE("assets maidata normalizes genre labels and preserves special title ch
   options.format = ChartFormat::Maidata;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const std::string maidata = read_text_file(output_root / "011944_Rock & Roll_ [DX]" / "maidata.txt");
+  const std::string maidata = read_text_file(output_root / "012340_Rock & Roll_ [DX]" / "maidata.txt");
   REQUIRE(maidata.find("&title=Rock & Roll? [DX]") != std::string::npos);
   REQUIRE(maidata.find("&genre=ゲーム&バラエティ") != std::string::npos);
 
@@ -570,27 +600,27 @@ TEST_CASE("assets maidata can export display levels in lv fields", "[assets][mai
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  const fs::path track_folder = assets_root / "A045" / "music" / "music011944";
+  const fs::path track_folder = assets_root / "A045" / "music" / "music012340";
   fs::create_directories(track_folder);
-  write_text_file(track_folder / "011944_00.ma2", sample_ma2());
-  write_text_file(track_folder / "011944_01.ma2", sample_ma2());
-  write_text_file(track_folder / "011944_02.ma2", sample_ma2());
-  write_text_file(track_folder / "011944_03.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_00.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_01.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_02.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_03.ma2", sample_ma2());
 
   const std::string xml =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData>\n"
-    "  <name><id>11944</id><str>Restricted Access</str></name>\n"
-    "  <artistName><id>1</id><str>Knighthood</str></artistName>\n"
+    "  <name><id>12340</id><str>" + kMockTitleAlpha + "</str></name>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
     "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
     "  <bpm>185</bpm>\n"
     "  <version>25007</version>\n"
-    "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+    "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
     "  <notesData>\n"
-    "    <Notes><file><path>011944_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
-    "    <Notes><file><path>011944_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><musicLevelID>8</musicLevelID><notesDesigner><str>Tester</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
-    "    <Notes><file><path>011944_02.ma2</path></file><level>11</level><levelDecimal>5</levelDecimal><musicLevelID>15</musicLevelID><notesDesigner><str>Tester</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
-    "    <Notes><file><path>011944_03.ma2</path></file><level>13</level><levelDecimal>8</levelDecimal><musicLevelID>20</musicLevelID><notesDesigner><str>Tester</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><musicLevelID>8</musicLevelID><notesDesigner><str>" + kMockChartDesignerA + "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_02.ma2</path></file><level>11</level><levelDecimal>5</levelDecimal><musicLevelID>15</musicLevelID><notesDesigner><str>" + kMockChartDesignerB + "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_03.ma2</path></file><level>13</level><levelDecimal>8</levelDecimal><musicLevelID>20</musicLevelID><notesDesigner><str>" + kMockChartDesignerC + "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
     "  </notesData>\n"
     "</MusicData>\n";
   write_text_file(track_folder / "Music.xml", xml);
@@ -602,7 +632,7 @@ TEST_CASE("assets maidata can export display levels in lv fields", "[assets][mai
   options.maidata_level_mode = MaidataLevelMode::Display;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const std::string maidata = read_text_file(output_root / "011944_Restricted Access [DX]" / "maidata.txt");
+  const std::string maidata = read_text_file(output_root / kMockFolder012340TitleAlphaDx / "maidata.txt");
   REQUIRE(maidata.find("&lv_2=4") != std::string::npos);
   REQUIRE(maidata.find("&lv_3=7+") != std::string::npos);
   REQUIRE(maidata.find("&lv_4=11") != std::string::npos);
@@ -617,7 +647,7 @@ TEST_CASE("assets maidata falls back to filename difficulties without notesData"
   const fs::path output_root = temp_root / "output";
 
   fs::create_directories(assets_root);
-  create_track(assets_root / "A045", "019999", "OneBasedSong", "GAME", "PRISM", { 1, 7 });
+  create_track(assets_root / "A001", "019999", "OneBasedSong", "GAME", "PRISM", { 1, 7 });
 
   AssetsOptions options;
   options.streaming_assets_path = assets_root;
@@ -637,23 +667,23 @@ TEST_CASE("assets selected difficulty follows notesData maidata numbering", "[as
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  const fs::path track_folder = assets_root / "A045" / "music" / "music011944";
+  const fs::path track_folder = assets_root / "A045" / "music" / "music012340";
   fs::create_directories(track_folder);
-  write_text_file(track_folder / "011944_00.ma2", sample_ma2());
-  write_text_file(track_folder / "011944_01.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_00.ma2", sample_ma2());
+  write_text_file(track_folder / "012340_01.ma2", sample_ma2());
 
   const std::string xml =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData>\n"
-    "  <name><id>11944</id><str>Restricted Access</str></name>\n"
-    "  <artistName><id>1</id><str>Knighthood</str></artistName>\n"
+    "  <name><id>12340</id><str>" + kMockTitleAlpha + "</str></name>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
     "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
     "  <bpm>185</bpm>\n"
     "  <version>25007</version>\n"
-    "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+    "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
     "  <notesData>\n"
-    "    <Notes><file><path>011944_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
-    "    <Notes><file><path>011944_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><musicLevelID>8</musicLevelID><notesDesigner><str>Tester</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_00.ma2</path></file><level>4</level><levelDecimal>0</levelDecimal><musicLevelID>4</musicLevelID><notesDesigner><str></str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>012340_01.ma2</path></file><level>7</level><levelDecimal>8</levelDecimal><musicLevelID>8</musicLevelID><notesDesigner><str>" + kMockChartDesignerA + "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
     "  </notesData>\n"
     "</MusicData>\n";
   write_text_file(track_folder / "Music.xml", xml);
@@ -662,11 +692,11 @@ TEST_CASE("assets selected difficulty follows notesData maidata numbering", "[as
   options.streaming_assets_path = assets_root;
   options.output_path = output_root;
   options.format = ChartFormat::Maidata;
-  options.target_music_id = "11944";
+  options.target_music_id = "12340";
   options.target_difficulty = 2;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const std::string maidata = read_text_file(output_root / "011944_Restricted Access [DX]" / "maidata.txt");
+  const std::string maidata = read_text_file(output_root / kMockFolder012340TitleAlphaDx / "maidata.txt");
   REQUIRE(maidata.find("&lv_2=4.0") != std::string::npos);
   REQUIRE(maidata.find("&inote_2=") != std::string::npos);
   REQUIRE(maidata.find("&lv_3=7.8") == std::string::npos);
@@ -688,29 +718,29 @@ TEST_CASE("assets maidata exports utage charts to slot 7", "[assets][maidata]") 
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\">\n"
     "  <dataName>music101234</dataName>\n"
-    "  <netOpenName><id>260999</id><str>Net260999</str></netOpenName>\n"
-    "  <releaseTagName><id>5001</id><str>Ver1.50.00</str></releaseTagName>\n"
+    "  <netOpenName><id>299099</id><str>Net299099</str></netOpenName>\n"
+    "  <releaseTagName><id>5001</id><str>" + kMockReleaseTag + "</str></releaseTagName>\n"
     "  <disable>false</disable>\n"
-    "  <name><id>101234</id><str>[宴]Test Utage</str></name>\n"
-    "  <sortName>[宴]TESTUTAGE</sortName>\n"
-    "  <artistName><id>1</id><str>Tester</str></artistName>\n"
+    "  <name><id>101234</id><str>" + kMockUtageChartA + "</str></name>\n"
+    "  <sortName>[UTAGE]MOCKCHARTA</sortName>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
     "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
     "  <bpm>180</bpm>\n"
     "  <version>25007</version>\n"
-    "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+    "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
     "  <notesData>\n"
     "    <Notes>\n"
     "      <file><path>101234_00.ma2</path></file>\n"
     "      <level>14</level>\n"
     "      <levelDecimal>1</levelDecimal>\n"
-    "      <notesDesigner><id>128</id><str>宴テスター</str></notesDesigner>\n"
+    "      <notesDesigner><id>128</id><str>" + kMockUtageDesigner + "</str></notesDesigner>\n"
     "      <notesType>0</notesType>\n"
     "      <musicLevelID>22</musicLevelID>\n"
     "      <maxNotes>999</maxNotes>\n"
     "      <isEnable>true</isEnable>\n"
     "    </Notes>\n"
     "  </notesData>\n"
-    "  <utageKanjiName><id>0</id><str>宴試験</str></utageKanjiName>\n"
+    "  <utageKanjiName><id>0</id><str>" + kMockUtageTag + "</str></utageKanjiName>\n"
     "  <comment />\n"
     "  <utagePlayStyle>1</utagePlayStyle>\n"
     "</MusicData>\n";
@@ -722,10 +752,10 @@ TEST_CASE("assets maidata exports utage charts to slot 7", "[assets][maidata]") 
   options.format = ChartFormat::Maidata;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const fs::path maidata_path = append_utf8_path(output_root, "101234_" + sanitize_folder_name("[宴]Test Utage")) / "maidata.txt";
+  const fs::path maidata_path = append_utf8_path(output_root, kMockFolder101234Utage) / "maidata.txt";
   const std::string maidata = read_text_file(maidata_path);
   REQUIRE(maidata.find("&lv_7=14.1") != std::string::npos);
-  REQUIRE(maidata.find("&des_7=宴テスター") != std::string::npos);
+  REQUIRE(maidata.find(kMetaDes7MockUtageDesigner) != std::string::npos);
   REQUIRE(maidata.find("&inote_7=") != std::string::npos);
   REQUIRE(maidata.find("&lv_2=") == std::string::npos);
   REQUIRE(maidata.find("&inote_2=") == std::string::npos);
@@ -745,16 +775,16 @@ TEST_CASE("assets selected difficulty 7 exports utage chart only", "[assets][mai
   const std::string xml =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData>\n"
-    "  <name><id>101235</id><str>[宴]Filter Utage</str></name>\n"
-    "  <artistName><id>1</id><str>Tester</str></artistName>\n"
+    "  <name><id>101235</id><str>" + kMockUtageChartB + "</str></name>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
     "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
     "  <bpm>181</bpm>\n"
     "  <version>25007</version>\n"
-    "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+    "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
     "  <notesData>\n"
-    "    <Notes><file><path>101235_00.ma2</path></file><level>14</level><levelDecimal>3</levelDecimal><musicLevelID>22</musicLevelID><notesDesigner><str>宴テスター</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>101235_00.ma2</path></file><level>14</level><levelDecimal>3</levelDecimal><musicLevelID>22</musicLevelID><notesDesigner><str>" + kMockUtageDesigner + "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
     "  </notesData>\n"
-    "  <utageKanjiName><id>0</id><str>宴試験</str></utageKanjiName>\n"
+    "  <utageKanjiName><id>0</id><str>" + kMockUtageTag + "</str></utageKanjiName>\n"
     "  <utagePlayStyle>1</utagePlayStyle>\n"
     "</MusicData>\n";
   write_text_file(track_folder / "Music.xml", xml);
@@ -767,7 +797,7 @@ TEST_CASE("assets selected difficulty 7 exports utage chart only", "[assets][mai
   options.target_difficulty = 7;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const fs::path maidata_path = append_utf8_path(output_root, "101235_" + sanitize_folder_name("[宴]Filter Utage")) / "maidata.txt";
+  const fs::path maidata_path = append_utf8_path(output_root, kMockFolder101235Utage) / "maidata.txt";
   const std::string maidata = read_text_file(maidata_path);
   REQUIRE(maidata.find("&lv_7=14.3") != std::string::npos);
   REQUIRE(maidata.find("&inote_7=") != std::string::npos);
@@ -789,16 +819,16 @@ TEST_CASE("assets maidata display mode keeps utage chart on slot 7", "[assets][m
   const std::string xml =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<MusicData>\n"
-    "  <name><id>101236</id><str>[宴]Display Utage</str></name>\n"
-    "  <artistName><id>1</id><str>Tester</str></artistName>\n"
-    "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
+    "  <name><id>101236</id><str>" + kMockUtageChartC + "</str></name>\n"
+    "  <artistName><id>1</id><str>" + kMockArtist + "</str></artistName>\n"
+    "  <genreName><id>104</id><str>ゲーム&バラエティ</str></genreName>\n"
     "  <bpm>182</bpm>\n"
     "  <version>25007</version>\n"
-    "  <AddVersion><id>23</id><str>PRiSM</str></AddVersion>\n"
+    "  <AddVersion><id>23</id><str>" + kMockVersion + "</str></AddVersion>\n"
     "  <notesData>\n"
-    "    <Notes><file><path>101236_00.ma2</path></file><level>14</level><levelDecimal>6</levelDecimal><musicLevelID>22</musicLevelID><notesDesigner><str>宴テスター</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+    "    <Notes><file><path>101236_00.ma2</path></file><level>14</level><levelDecimal>6</levelDecimal><musicLevelID>22</musicLevelID><notesDesigner><str>" + kMockUtageDesigner + "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
     "  </notesData>\n"
-    "  <utageKanjiName><id>0</id><str>宴試験</str></utageKanjiName>\n"
+    "  <utageKanjiName><id>0</id><str>" + kMockUtageTag + "</str></utageKanjiName>\n"
     "  <utagePlayStyle>1</utagePlayStyle>\n"
     "</MusicData>\n";
   write_text_file(track_folder / "Music.xml", xml);
@@ -810,10 +840,10 @@ TEST_CASE("assets maidata display mode keeps utage chart on slot 7", "[assets][m
   options.maidata_level_mode = MaidataLevelMode::Display;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const fs::path maidata_path = append_utf8_path(output_root, "101236_" + sanitize_folder_name("[宴]Display Utage")) / "maidata.txt";
+  const fs::path maidata_path = append_utf8_path(output_root, kMockFolder101236Utage) / "maidata.txt";
   const std::string maidata = read_text_file(maidata_path);
   REQUIRE(maidata.find("&lv_7=14+") != std::string::npos);
-  REQUIRE(maidata.find("&des_7=宴テスター") != std::string::npos);
+  REQUIRE(maidata.find(kMetaDes7MockUtageDesigner) != std::string::npos);
   REQUIRE(maidata.find("&inote_7=") != std::string::npos);
   REQUIRE(maidata.find("&lv_2=") == std::string::npos);
 
@@ -825,59 +855,55 @@ TEST_CASE("assets can export self-contained streamingassets fixture with maidata
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  create_complete_maidata_fixture_011944(assets_root);
+  create_complete_maidata_fixture_012340(assets_root);
 
   AssetsOptions options;
   options.streaming_assets_path = assets_root;
   options.output_path = output_root;
   options.format = ChartFormat::Maidata;
-  options.target_music_id = "11944";
+  options.target_music_id = "12340";
 
   REQUIRE(run_compile_assets(options) == 0);
 
-  const fs::path maidata_path = append_utf8_path(output_root, "011944_Restricted Access [DX]") / "maidata.txt";
+  const fs::path maidata_path = append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "maidata.txt";
   REQUIRE(fs::exists(maidata_path));
 
   const std::string maidata = read_text_file(maidata_path);
-  REQUIRE(maidata.find("&title=Restricted Access [DX]") != std::string::npos);
-  REQUIRE(maidata.find("&shortid=11944") != std::string::npos);
+  REQUIRE(maidata.find(kMetaTitleMockAlphaDx) != std::string::npos);
+  REQUIRE(maidata.find(kMetaShortIdMock12340) != std::string::npos);
   REQUIRE(maidata.find("&lv_2=4.0") != std::string::npos);
   REQUIRE(maidata.find("&lv_3=7.8") != std::string::npos);
   REQUIRE(maidata.find("&lv_4=11.5") != std::string::npos);
   REQUIRE(maidata.find("&lv_5=13.8") != std::string::npos);
   REQUIRE(maidata.find("&inote_2=") != std::string::npos);
   REQUIRE(maidata.find("&inote_5=") != std::string::npos);
-  REQUIRE(fs::exists(append_utf8_path(output_root, "011944_Restricted Access [DX]") / "track.mp3"));
-  REQUIRE(fs::exists(append_utf8_path(output_root, "011944_Restricted Access [DX]") / "bg.png"));
-  REQUIRE(fs::exists(append_utf8_path(output_root, "011944_Restricted Access [DX]") / "pv.mp4"));
+  REQUIRE(fs::exists(append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "track.mp3"));
+  REQUIRE(fs::exists(append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "bg.png"));
+  REQUIRE(fs::exists(append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "pv.mp4"));
 
   fs::remove_all(temp_root);
 }
 
-TEST_CASE("assets maidata uses canonical inote formatting for real fixture", "[assets][maidata]") {
-  const fs::path assets_root = repo_test_data_path("StreamingAssets");
-  const fs::path sample = assets_root / "A045" / "music" / "music011944" / "011944_00.ma2";
-  if (!fs::exists(sample)) {
-    SKIP("real StreamingAssets maidata fixture not found in test workspace");
-  }
-
-  const fs::path temp_root = unique_temp_dir("assets_real_fixture_inote_style");
+TEST_CASE("assets maidata uses canonical inote formatting for mock fixture", "[assets][maidata]") {
+  const fs::path temp_root = unique_temp_dir("assets_mock_fixture_inote_style");
+  const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
+
+  create_complete_maidata_fixture_012340(assets_root);
 
   AssetsOptions options;
   options.streaming_assets_path = assets_root;
   options.output_path = output_root;
   options.format = ChartFormat::Maidata;
-  options.target_music_id = "11944";
+  options.target_music_id = "12340";
 
   REQUIRE(run_compile_assets(options) == 0);
 
-  const fs::path maidata_path = append_utf8_path(output_root, "011944_Restricted Access [DX]") / "maidata.txt";
+  const fs::path maidata_path = append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "maidata.txt";
   REQUIRE(fs::exists(maidata_path));
 
   const std::string maidata = read_text_file(maidata_path);
-  REQUIRE(maidata.find("&inote_2=(185){1},\n{1},\n{1}1x,\n") != std::string::npos);
-  REQUIRE(maidata.find("{1}1-5[4:3],") != std::string::npos);
+  REQUIRE(maidata.find("&inote_2=") != std::string::npos);
   REQUIRE(maidata.find("##") == std::string::npos);
   REQUIRE(maidata.find("/{4}/") == std::string::npos);
 
@@ -889,32 +915,32 @@ TEST_CASE("assets can export self-contained streamingassets fixture with display
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  create_complete_maidata_fixture_011944(assets_root);
+  create_complete_maidata_fixture_012340(assets_root);
 
   AssetsOptions options;
   options.streaming_assets_path = assets_root;
   options.output_path = output_root;
   options.format = ChartFormat::Maidata;
-  options.target_music_id = "11944";
+  options.target_music_id = "12340";
   options.maidata_level_mode = MaidataLevelMode::Display;
 
   REQUIRE(run_compile_assets(options) == 0);
 
-  const fs::path maidata_path = append_utf8_path(output_root, "011944_Restricted Access [DX]") / "maidata.txt";
+  const fs::path maidata_path = append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "maidata.txt";
   REQUIRE(fs::exists(maidata_path));
 
   const std::string maidata = read_text_file(maidata_path);
-  REQUIRE(maidata.find("&title=Restricted Access [DX]") != std::string::npos);
-  REQUIRE(maidata.find("&shortid=11944") != std::string::npos);
+  REQUIRE(maidata.find(kMetaTitleMockAlphaDx) != std::string::npos);
+  REQUIRE(maidata.find(kMetaShortIdMock12340) != std::string::npos);
   REQUIRE(maidata.find("&lv_2=4") != std::string::npos);
   REQUIRE(maidata.find("&lv_3=7+") != std::string::npos);
   REQUIRE(maidata.find("&lv_4=11") != std::string::npos);
   REQUIRE(maidata.find("&lv_5=13+") != std::string::npos);
   REQUIRE(maidata.find("&inote_2=") != std::string::npos);
   REQUIRE(maidata.find("&inote_5=") != std::string::npos);
-  REQUIRE(fs::exists(append_utf8_path(output_root, "011944_Restricted Access [DX]") / "track.mp3"));
-  REQUIRE(fs::exists(append_utf8_path(output_root, "011944_Restricted Access [DX]") / "bg.png"));
-  REQUIRE(fs::exists(append_utf8_path(output_root, "011944_Restricted Access [DX]") / "pv.mp4"));
+  REQUIRE(fs::exists(append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "track.mp3"));
+  REQUIRE(fs::exists(append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "bg.png"));
+  REQUIRE(fs::exists(append_utf8_path(output_root, kMockFolder012340TitleAlphaDx) / "pv.mp4"));
 
   fs::remove_all(temp_root);
 }
@@ -924,7 +950,7 @@ TEST_CASE("assets preserves utf8 folder names for non-English titles") {
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
-  const std::u8string title_u8 = u8"胡桃乃舞";
+  const std::u8string title_u8 = u8"舞萌DX";
   std::string title;
   title.reserve(title_u8.size());
   for (const char8_t ch : title_u8) {

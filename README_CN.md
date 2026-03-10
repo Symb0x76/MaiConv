@@ -6,11 +6,11 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 ## 待办
 
-- [ ] 增加 Simai 数据库 -> ma2 资产导出
+- [ ] 增加 png/mp3/mp4 -> ab/awb+acb/dat 资产导出
 
 ## 特性
 
-- C++20 + CMake + git submodule（third_party）
+- C++20 + CMake + git submodule（运行时依赖在 third_party，测试用 Catch2 通过 FetchContent 拉取）
 - CLI 子命令：
   - `maiconv ma2`
   - `maiconv simai`
@@ -22,8 +22,9 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 ## 依赖目录说明
 
-- `third_party/*`：所有第三方依赖均在此目录，并由 git submodule 管理。
-- 当前子模块：`CLI11`、`Catch2`、`tinyxml2`、`vgmstream`、`shine`、`minimp4`、`UABE`。
+- `third_party/*`：运行时第三方依赖在此目录，并由 git submodule 管理。
+- 测试依赖 `Catch2` 在 `MAICONV_BUILD_TESTS=ON` 时由 CMake FetchContent 自动拉取。
+- 当前子模块：`CLI11`、`tinyxml2`、`vgmstream`、`shine`。
 
 ## 构建
 
@@ -33,6 +34,33 @@ cmake --preset default
 cmake --build --preset default
 ctest --preset default
 ```
+
+## FFmpeg 依赖说明
+
+`maiconv media` 的视频相关功能依赖系统中的 `ffmpeg` 可执行文件（在 `PATH` 中可直接调用）。
+
+必需能力（按功能划分）：
+- `dat/usm -> mp4`：需要 `libx264` 编码器（MaiConv 会把 VP9 IVF 转码为 H.264 MP4）
+- `mp4 -> dat`（含有模板与无模板两种路径）：需要 `libvpx-vp9` 编码器（MaiConv 会先转码为 VP9 IVF）
+
+建议同时具备：
+- `ffprobe`（用于手工排查媒体流信息；MaiConv 运行时不强依赖）
+
+快速自检（Windows PowerShell）：
+
+```powershell
+ffmpeg -version
+ffmpeg -hide_banner -encoders | Select-String "libx264|libvpx-vp9"
+```
+
+快速自检（Linux/macOS）：
+
+```bash
+ffmpeg -version
+ffmpeg -hide_banner -encoders | grep -E "libx264|libvpx-vp9"
+```
+
+若缺少编码器，请安装带完整编码库的 ffmpeg 发行版（包含 `libx264` 与 `libvpx`）。
 
 ## CLI
 
@@ -53,25 +81,25 @@ maiconv simai --input /path/to/maidata.txt --difficulty 3 --format ma2 --output 
 导出 StreamingAssets 中的全部曲目：
 
 ```bash
-maiconv assets --input /path/to/StreamingAssets --output ./Output --layout flat
+maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat
 ```
 
 导出指定 id（该 id 的全部难度）：
 
 ```bash
-maiconv assets --input /path/to/StreamingAssets --output ./Output --id 114514 --layout flat
+maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514 --layout flat
 ```
 
 导出指定 id 的指定难度：
 
 ```bash
-maiconv assets --input /path/to/StreamingAssets --output ./Output --id 114514 --difficulty 3 --layout flat
+maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514 --difficulty 3 --layout flat
 ```
 
 以显示等级导出 `maidata.txt` 中的 `lv_*`：
 
 ```bash
-maiconv assets --input /path/to/StreamingAssets --output ./Output --format maidata --display
+maiconv assets --input /path/to/StreamingAssets --output ./output --format maidata --display
 ```
 
 规则：
@@ -95,6 +123,12 @@ ACB+AWB 转 MP3：
 maiconv media audio --acb /path/to/music114514.acb --awb /path/to/music114514.awb --output ./track.mp3
 ```
 
+MP3 打包为 ACB+AWB：
+
+```bash
+maiconv media audio --input /path/to/track.mp3 --output-acb ./track.acb --output-awb ./track.awb
+```
+
 AB 封面转 PNG：
 
 ```bash
@@ -105,6 +139,12 @@ DAT/USM 转 MP4：
 
 ```bash
 maiconv media video --input /path/to/114514.dat --output ./pv.mp4
+```
+
+MP4 转 DAT：
+
+```bash
+maiconv media video --input /path/to/pv.mp4 --output ./pv.dat
 ```
 
 ## 资产命名兼容
@@ -142,8 +182,12 @@ assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
 - `acb + awb -> track.mp3`（内置 `libvgmstream` + `shine`）
 - `ab -> bg.png`（内置 PNG 提取）
 - `dat/usm -> pv.mp4`
-  - H.264 流：内置 USM 解析 + MP4 封装
-  - VP9 流：通过 `PATH` 中的 `ffmpeg` 转码为 H.264
+  - 仅支持 VP9 流；通过 `PATH` 中的 `ffmpeg` 转码为 H.264 MP4
+- `mp4 + template(dat/usm) -> pv.dat`
+  - 先转码为 VP9 IVF，再按模板 DAT/USM 的视频包结构回填并走逆向加密写回
+- `mp4 -> pv.dat`（无模板）
+  - 先转码为 VP9 IVF，再由 MaiConv 内置 C++ 打包器生成 DAT（`@SFV` 分包 + 同步加密）
+  - 该模式仅需环境中可用 `ffmpeg`（需支持 `libvpx-vp9` 编码）
 
 若转换失败，不再保留原始素材文件；该曲目会被标记为 `_Incomplete`（未使用 `--ignore` 时则直接失败），并将失败的源/目标路径写入 `_log.txt`。
 
