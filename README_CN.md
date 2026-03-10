@@ -7,6 +7,7 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 ## 待办
 
 - [ ] 增加 png/mp3/mp4 -> ab/awb+acb/dat 资产导出
+- [ ] 实现本地lz4取代对UABE的依赖以提升跨平台性能
 
 ## 特性
 

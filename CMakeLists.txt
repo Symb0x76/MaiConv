@@ -257,6 +257,7 @@ if(MAICONV_BUILD_TESTS)
         tests/unit/test_media.cpp
         tests/unit/test_simai.cpp
         tests/unit/test_assets.cpp
+        tests/unit/test_uabe_lz4.cpp
     )
     target_link_libraries(MaiConv_unit_tests
         PRIVATE

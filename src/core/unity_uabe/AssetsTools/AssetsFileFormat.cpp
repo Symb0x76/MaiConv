@@ -676,7 +676,7 @@ ASSETSTOOLS_API QWORD Type_0D::Read(bool hasTypeTree, QWORD absFilePos,
         pReader->Read(curFilePos, typeTreeLen, pTreeBuffer);
         curFilePos += typeTreeLen;
         //((uint8_t*)pTreeBuffer)[typeTreeLen] = 0; //make sure the string table
-        //is null-terminated
+        // is null-terminated
         IAssetsReader *pNewReader =
             Create_AssetsReaderFromMemory(pTreeBuffer, typeTreeLen, false);
         if (pNewReader != NULL) {
@@ -1071,18 +1071,18 @@ ASSETSTOOLS_API QWORD
 AssetsFileDependency::GUID128::Read(QWORD absFilePos, IAssetsReader *pReader) {
   pReader->Read(absFilePos, 8, &this->mostSignificant);
   absFilePos += 8;
-  SwapEndians_<__int64>(this->mostSignificant);
+  SwapEndians_<int64_t>(this->mostSignificant);
   pReader->Read(absFilePos, 8, &this->leastSignificant);
   absFilePos += 8;
-  SwapEndians_<__int64>(this->leastSignificant);
+  SwapEndians_<int64_t>(this->leastSignificant);
   return absFilePos;
 }
 ASSETSTOOLS_API QWORD
 AssetsFileDependency::GUID128::Write(QWORD absFilePos, IAssetsWriter *pWriter) {
-  __int64 qwTmp = SwapEndians<__int64>(this->mostSignificant);
+  int64_t qwTmp = SwapEndians<int64_t>(this->mostSignificant);
   pWriter->Write(absFilePos, 8, &qwTmp);
   absFilePos += 8;
-  qwTmp = SwapEndians<__int64>(this->leastSignificant);
+  qwTmp = SwapEndians<int64_t>(this->leastSignificant);
   pWriter->Write(absFilePos, 8, &qwTmp);
   absFilePos += 8;
   return absFilePos;
@@ -1600,7 +1600,7 @@ ASSETSTOOLS_API QWORD AssetsFile::Write(IAssetsWriter *pWriter, QWORD filePos,
     if ((pCurReplacer->GetFileID() == fileID ||
          pCurReplacer->GetFileID() == 0 || fileID == (uint32_t)-1) &&
         pCurReplacer->GetPathID() != 0) {
-      __int64 curPathID = (__int64)pCurReplacer->GetPathID();
+      int64_t curPathID = (int64_t)pCurReplacer->GetPathID();
       bool alreadyExists = false;
       exAssetFileInfo fileInfo;
       exAssetFileInfo *pFileInfo = &fileInfo;
@@ -1918,8 +1918,8 @@ WriteAssetsFile_Step1: {
     // firstFilePos = 0; //for writing the header
     metadataSize -= typeTreePos; // TODO: Make sure this still works
     //(previously increased metadataSize by 1 because of the endianness byte,
-    //but it was more likely because of the missing field after the dependencies
-    //list)
+    // but it was more likely because of the missing field after the
+    // dependencies list)
   } else {
     metadataSize -= (headerPos + this->header.GetSizeBytes());
     if (filePos < this->header.offs_firstFile)
@@ -2220,7 +2220,7 @@ AssetsFile::VerifyAssetsFile(AssetsFileVerifyLogger logger) {
 
   allocCount = (uintptr_t)&pFileList
                    ->fileInfs[fileListSize]; //(fileListSize *
-                                             //sizeof(AssetFileInfo)) + 4 + 4;
+                                             // sizeof(AssetFileInfo)) + 4 + 4;
   pFileList = (AssetFileList *)malloc(allocCount);
   if (!pFileList) {
     errorData = (void *)(allocCount);

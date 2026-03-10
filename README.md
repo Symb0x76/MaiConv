@@ -6,7 +6,8 @@ Cross-platform C++ reimplementation of [MaichartConverter](https://github.com/Ne
 
 ## TODO
 
-- [ ] Add Simai database -> ma2 assets export
+- [ ] Implement local lz4 decompression in replacement of Unity's LZ4 library (currently used via UABE code, which is only used for ACB+AWB decoding and is not performance-critical)
+- [ ] Add png/mp3/mp4 -> ab/awb+acb/dat asset export
 
 ## Features
 
