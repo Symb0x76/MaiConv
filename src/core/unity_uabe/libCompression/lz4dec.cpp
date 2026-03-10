@@ -1,4 +1,3 @@
-#pragma once
 #include "lz4dec.h"
 #include <stddef.h>
 #include <string.h>
