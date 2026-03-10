@@ -24,11 +24,23 @@ jobs:
     - name: Setup Ninja
       uses: seanmiddleditch/gha-setup-ninja@v5
 
+    - name: Install FFmpeg build prerequisites (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y nasm yasm
+
+    - name: Install FFmpeg build prerequisites (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew update
+        brew install nasm yasm
+
     - name: Clean build directory
       run: cmake -E rm -rf build/default
 
     - name: Configure
-      run: cmake --preset default -DUSE_FFMPEG=OFF
+      run: cmake --preset default
 
     - name: Build
       run: cmake --build --preset default --parallel

@@ -22,6 +22,7 @@ std::optional<ChartFormat> parse_chart_format(const std::string& value) {
       {"simai", ChartFormat::Simai},
       {"simai-fes", ChartFormat::SimaiFes},
       {"simaifes", ChartFormat::SimaiFes},
+      {"maidata", ChartFormat::Maidata},
       {"ma2", ChartFormat::Ma2_103},
       {"ma2-103", ChartFormat::Ma2_103},
       {"ma2_103", ChartFormat::Ma2_103},
@@ -41,6 +42,8 @@ std::string to_string(ChartFormat format) {
       return "simai";
     case ChartFormat::SimaiFes:
       return "simai-fes";
+    case ChartFormat::Maidata:
+      return "maidata";
     case ChartFormat::Ma2_103:
       return "ma2-103";
     case ChartFormat::Ma2_104:

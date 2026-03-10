@@ -10,3 +10,6 @@ StreamingAssets/
 
 # External repositories
 external/
+
+# Executables
+*.exe

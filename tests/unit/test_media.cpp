@@ -5,8 +5,48 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <string>
 
 namespace fs = std::filesystem;
+
+namespace {
+  fs::path repo_test_data_path(const fs::path& relative) {
+    return fs::path(__FILE__).parent_path().parent_path() / relative;
+  }
+
+  void require_real_jacket_bundle_converts_to_png(const std::string& music_id) {
+    const fs::path sample = repo_test_data_path(
+      fs::path("StreamingAssets") / "A045" / "AssetBundleImages" / "jacket" /
+      ("UI_Jacket_00" + music_id + ".ab"));
+    if (!fs::exists(sample)) {
+      SKIP("sample assetbundle jacket not found in test workspace");
+    }
+
+    const fs::path temp_root = fs::temp_directory_path() / ("maiconv_media_ab_to_png_" + music_id);
+    std::error_code ec;
+    fs::remove_all(temp_root, ec);
+    fs::create_directories(temp_root, ec);
+
+    const fs::path output = temp_root / "bg.png";
+    REQUIRE(maiconv::convert_ab_to_png(sample, output));
+    REQUIRE(fs::exists(output));
+    REQUIRE(fs::file_size(output) > 1024);
+
+    std::array<unsigned char, 8> head{};
+    {
+      std::ifstream in(output, std::ios::binary);
+      REQUIRE(static_cast<bool>(in));
+      in.read(reinterpret_cast<char*>(head.data()), static_cast<std::streamsize>(head.size()));
+      REQUIRE(in.gcount() == static_cast<std::streamsize>(head.size()));
+    }
+
+    const std::array<unsigned char, 8> png_sig = {
+        0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU };
+    REQUIRE(head == png_sig);
+
+    fs::remove_all(temp_root, ec);
+  }
+}
 
 TEST_CASE("media conversion fails cleanly for missing input files") {
   const fs::path temp_root = fs::temp_directory_path() / "maiconv_media_missing_input";
@@ -48,7 +88,7 @@ TEST_CASE("media copy mp3 without transcoder") {
 }
 
 TEST_CASE("media converts real usm/dat sample to mp4") {
-  const fs::path sample = fs::path("tests") / "StreamingAssets" / "A045" / "MovieData" / "001944.dat";
+  const fs::path sample = repo_test_data_path(fs::path("StreamingAssets") / "A045" / "MovieData" / "001944.dat");
   if (!fs::exists(sample)) {
     SKIP("sample dat not found in test workspace");
   }
@@ -77,4 +117,16 @@ TEST_CASE("media converts real usm/dat sample to mp4") {
   REQUIRE(head[7] == static_cast<unsigned char>('p'));
 
   fs::remove_all(temp_root, ec);
+}
+
+TEST_CASE("media converts real UnityFS jacket assetbundle to png") {
+  require_real_jacket_bundle_converts_to_png("1944");
+}
+
+TEST_CASE("media converts real UnityFS jacket assetbundle 11945 to png") {
+  require_real_jacket_bundle_converts_to_png("1945");
+}
+
+TEST_CASE("media converts real UnityFS jacket assetbundle 11946 to png") {
+  require_real_jacket_bundle_converts_to_png("1946");
 }

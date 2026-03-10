@@ -36,10 +36,7 @@ namespace maiconv {
       [this](const MeasureChange& a, const MeasureChange& b) {
         return a.tick_stamp(definition_) < b.tick_stamp(definition_);
       });
-    std::sort(notes_.begin(), notes_.end(), [this](const Note& a, const Note& b) {
-      if (a.tick_stamp(definition_) == b.tick_stamp(definition_)) {
-        return static_cast<int>(a.type) < static_cast<int>(b.type);
-      }
+    std::stable_sort(notes_.begin(), notes_.end(), [this](const Note& a, const Note& b) {
       return a.tick_stamp(definition_) < b.tick_stamp(definition_);
       });
 

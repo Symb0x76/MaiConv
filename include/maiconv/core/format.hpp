@@ -8,6 +8,7 @@ namespace maiconv {
 enum class ChartFormat {
   Simai,
   SimaiFes,
+  Maidata,
   Ma2_103,
   Ma2_104,
 };

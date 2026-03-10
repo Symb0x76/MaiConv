@@ -105,9 +105,9 @@ set(BUILD_V123 OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_STATIC OFF CACHE BOOL "" FORCE)
 
-set(USE_MPEG OFF CACHE BOOL "" FORCE)
+set(USE_MPEG OFF CACHE BOOL "Disable mpg123 path; rely on FFmpeg for MPEG-family decoding" FORCE)
 set(USE_VORBIS OFF CACHE BOOL "" FORCE)
-set(USE_FFMPEG OFF CACHE BOOL "Disable FFmpeg support in bundled vgmstream" FORCE)
+set(USE_FFMPEG ON CACHE BOOL "Enable FFmpeg support in bundled vgmstream" FORCE)
 set(USE_G7221 OFF CACHE BOOL "" FORCE)
 set(USE_G719 OFF CACHE BOOL "" FORCE)
 set(USE_ATRAC9 OFF CACHE BOOL "" FORCE)
@@ -122,15 +122,62 @@ file(GLOB SHINE_SOURCES CONFIGURE_DEPENDS
 add_library(shine STATIC ${SHINE_SOURCES})
 target_include_directories(shine PUBLIC third_party/shine/src/lib)
 
+add_library(maiconv_uabe_libCompression STATIC
+    third_party/UABE/libCompression/lz4.c
+    third_party/UABE/libCompression/lz4frame.c
+    third_party/UABE/libCompression/lz4hc.c
+    third_party/UABE/libCompression/xxhash.c
+    third_party/UABE/libCompression/lz4dec.cpp
+    third_party/UABE/libCompression/lz4enc.cpp
+    third_party/UABE/libCompression/LzFind.c
+    third_party/UABE/libCompression/LzFindMt.c
+    third_party/UABE/libCompression/LzmaDec.c
+    third_party/UABE/libCompression/LzmaEnc.c
+    third_party/UABE/libCompression/Threads.c
+)
+target_include_directories(maiconv_uabe_libCompression PUBLIC third_party/UABE/libCompression)
+
+add_library(maiconv_uabe_libStringConverter STATIC
+    third_party/UABE/libStringConverter/convert.cpp
+)
+target_include_directories(maiconv_uabe_libStringConverter PUBLIC third_party/UABE/libStringConverter)
+
+add_library(maiconv_uabe_assetstools STATIC
+    third_party/UABE/AssetsTools/AssetBundleFileFormat.cpp
+    third_party/UABE/AssetsTools/AssetBundleFileTable.cpp
+    third_party/UABE/AssetsTools/AssetsFileFormat.cpp
+    third_party/UABE/AssetsTools/AssetsFileReader.cpp
+    third_party/UABE/AssetsTools/AssetsFileTable.cpp
+    third_party/UABE/AssetsTools/AssetsReplacer.cpp
+    third_party/UABE/AssetsTools/AssetTypeClass.cpp
+    third_party/UABE/AssetsTools/BundleReplacer.cpp
+    third_party/UABE/AssetsTools/ClassDatabaseFile.cpp
+    third_party/UABE/AssetsTools/EngineVersion.cpp
+    third_party/UABE/AssetsTools/ResourceManagerFile.cpp
+)
+target_include_directories(maiconv_uabe_assetstools PUBLIC third_party/UABE/AssetsTools)
+target_compile_definitions(maiconv_uabe_assetstools PUBLIC
+    ASSETSTOOLS_IMPORTSTATIC
+    UNICODE
+    _UNICODE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    _CRT_SECURE_NO_WARNINGS
+    _CRT_NONSTDC_NO_DEPRECATE
+)
+target_link_libraries(maiconv_uabe_assetstools PUBLIC maiconv_uabe_libCompression maiconv_uabe_libStringConverter)
+
 add_library(MaiConv_core
     src/core/chart.cpp
     src/core/format.cpp
     src/core/io.cpp
     src/core/ma2.cpp
     src/core/media.cpp
+    src/core/unity_assetbundle.cpp
     src/core/minimp4_impl.c
     src/core/simai.cpp
     src/core/assets.cpp
+    third_party/UABE/Plugins/Texture/lodepng.cpp
 )
 
 target_include_directories(MaiConv_core PUBLIC include)
@@ -138,9 +185,25 @@ target_include_directories(MaiConv_core PRIVATE
     third_party/vgmstream/src
     third_party/shine/src/lib
     third_party/minimp4
+    third_party/UABE/AssetsTools
+    third_party/UABE/Plugins/Texture
+)
+target_compile_definitions(MaiConv_core PRIVATE
+    MAICONV_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    ASSETSTOOLS_IMPORTSTATIC
+    UNICODE
+    _UNICODE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    _CRT_SECURE_NO_WARNINGS
+    _CRT_NONSTDC_NO_DEPRECATE
 )
 target_link_libraries(MaiConv_core PUBLIC tinyxml2::tinyxml2)
-target_link_libraries(MaiConv_core PRIVATE libvgmstream shine)
+target_link_libraries(MaiConv_core PRIVATE libvgmstream shine maiconv_uabe_assetstools)
+
+if(WIN32)
+    target_link_libraries(MaiConv_core PRIVATE d3d11 d3dcompiler)
+endif()
 
 if(MSVC)
     target_compile_options(MaiConv_core PRIVATE /W4 /permissive- /Zc:__cplusplus)

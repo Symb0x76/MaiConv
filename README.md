@@ -68,10 +68,17 @@ Export one id with one difficulty:
 maiconv assets --input /path/to/StreamingAssets --output ./Output --id 363 --difficulty 3 --layout flat
 ```
 
+Export `maidata.txt` with display levels:
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./Output --format maidata --display
+```
+
 Rules:
 - when `--id` is omitted: export all tracks
 - when `--id` is provided and `--difficulty` is omitted: export all difficulties for that id
 - when both are provided: export only the selected difficulty
+- `--difficulty` uses exported `maidata` numbering: standard charts are usually `2..6`, utage is `7`
 
 `assets` auto-detects media folders from `StreamingAssets` and its first-level subdirectories:
 - audio: `SoundData`
@@ -136,6 +143,7 @@ When source media is in original game formats, `assets` converts them as follows
 - `ab -> bg.png` (embedded PNG extraction)
 - `dat/usm -> pv.mp4`
   - H.264 stream: built-in USM parser + MP4 mux
+  - VP9 stream: VP9->H.264 transcode via `ffmpeg` in `PATH`
 
 If conversion fails, raw assets are **not** preserved. The song is marked as `_Incomplete` (or the command fails without `--ignore`), and failed source/target paths are written to `_log.txt`.
 
@@ -143,6 +151,8 @@ If conversion fails, raw assets are **not** preserved. The song is marked as `_I
 - `flat` (default): `{output}/{id_title}`
 - `genre`: `{output}/{genre}/{id_title}`
 - `version`: `{output}/{version}/{id_title}`
+
+`assets --display` switches `lv_*` export from chart constants like `13.8` to display levels like `13+`.
 
 ## Tests
 
