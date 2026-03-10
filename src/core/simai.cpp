@@ -261,10 +261,16 @@ std::string slide_notation(NoteType type, int start_key, int end_key) {
   case NoteType::SlideWifi:
     return "w";
   case NoteType::SlideCurveLeft: {
+    if (start_key == 7 && end_key == 0) {
+      return "<";
+    }
     const int clockwise = (end_key - start_key + 8) % 8;
     return clockwise <= 4 ? ">" : "<";
   }
   case NoteType::SlideCurveRight: {
+    if (start_key == 7 && end_key == 0) {
+      return ">";
+    }
     const int clockwise = (end_key - start_key + 8) % 8;
     return clockwise <= 4 ? "<" : ">";
   }
