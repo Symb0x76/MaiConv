@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "../../src/core/unity_uabe/libCompression/lz4.h"
-#include "../../src/core/unity_uabe/libCompression/lz4dec.h"
+#include "../../third_party/unity_uabe/libCompression/lz4.h"
+#include "../../third_party/unity_uabe/libCompression/lz4dec.h"
 
 #include <algorithm>
 #include <cstdint>

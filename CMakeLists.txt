@@ -79,61 +79,7 @@ endfunction()
 
 maiconv_ensure_submodule("third_party/CLI11" "third_party/CLI11/CMakeLists.txt")
 maiconv_ensure_submodule("third_party/tinyxml2" "third_party/tinyxml2/CMakeLists.txt")
-maiconv_ensure_submodule("third_party/vgmstream" "third_party/vgmstream/CMakeLists.txt")
 maiconv_ensure_submodule("third_party/shine" "third_party/shine/src/lib/layer3.h")
-
-function(maiconv_patch_vgmstream_ffmpeg)
-    set(ffmpeg_cmake "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vgmstream/cmake/dependencies/ffmpeg.cmake")
-    if(NOT EXISTS "${ffmpeg_cmake}")
-        message(WARNING "vgmstream ffmpeg.cmake not found: ${ffmpeg_cmake}")
-        return()
-    endif()
-
-    file(READ "${ffmpeg_cmake}" ffmpeg_content)
-    if(APPLE)
-        string(FIND "${ffmpeg_content}" "--extra-cflags=--static" ffmpeg_has_static_cflags)
-        if(ffmpeg_has_static_cflags EQUAL -1)
-            return()
-        endif()
-
-        string(REPLACE "--extra-libs=-static" "" ffmpeg_content "${ffmpeg_content}")
-        string(REPLACE "--extra-cflags=--static" "" ffmpeg_content "${ffmpeg_content}")
-        string(REPLACE "--pkg-config-flags=--static" "" ffmpeg_content "${ffmpeg_content}")
-
-        file(WRITE "${ffmpeg_cmake}" "${ffmpeg_content}")
-        message(STATUS "Applied Apple ffmpeg static-flag patch for vgmstream")
-    endif()
-endfunction()
-
-function(maiconv_patch_vgmstream_linkage)
-    set(vgmstream_src_cmake "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vgmstream/src/CMakeLists.txt")
-    if(NOT EXISTS "${vgmstream_src_cmake}")
-        message(WARNING "vgmstream src CMakeLists not found: ${vgmstream_src_cmake}")
-        return()
-    endif()
-
-    file(READ "${vgmstream_src_cmake}" vgmstream_src_content)
-    set(vgmstream_linkage_patch
-        "setup_target(libvgmstream TRUE)
-
-if(TARGET FFMPEG_MAKE)
-    add_dependencies(libvgmstream FFMPEG_MAKE)
-endif()")
-    string(FIND "${vgmstream_src_content}" "${vgmstream_linkage_patch}" vgmstream_linkage_ok)
-    if(NOT vgmstream_linkage_ok EQUAL -1)
-        return()
-    endif()
-
-    string(FIND "${vgmstream_src_content}" "setup_target(libvgmstream)" vgmstream_linkage_old)
-    if(vgmstream_linkage_old EQUAL -1)
-        message(STATUS "Skipped vgmstream linkage auto-patch: target pattern not found in ${vgmstream_src_cmake}")
-        return()
-    endif()
-
-    string(REPLACE "setup_target(libvgmstream)" "${vgmstream_linkage_patch}" vgmstream_src_content "${vgmstream_src_content}")
-    file(WRITE "${vgmstream_src_cmake}" "${vgmstream_src_content}")
-    message(STATUS "Applied vgmstream static-link dependency patch with ffmpeg build dependency")
-endfunction()
 
 set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
@@ -176,10 +122,11 @@ set(USE_ATRAC9 OFF CACHE BOOL "" FORCE)
 set(USE_CELT OFF CACHE BOOL "" FORCE)
 set(USE_SPEEX OFF CACHE BOOL "" FORCE)
 
-maiconv_patch_vgmstream_ffmpeg()
-maiconv_patch_vgmstream_linkage()
-
 add_subdirectory(third_party/vgmstream third_party/vgmstream-build EXCLUDE_FROM_ALL)
+
+if(TARGET libvgmstream AND TARGET FFMPEG_MAKE)
+    add_dependencies(libvgmstream FFMPEG_MAKE)
+endif()
 
 file(GLOB SHINE_SOURCES CONFIGURE_DEPENDS
     third_party/shine/src/lib/*.c
@@ -188,44 +135,44 @@ add_library(shine STATIC ${SHINE_SOURCES})
 target_include_directories(shine PUBLIC third_party/shine/src/lib)
 
 set(MAICONV_UABE_LIBCOMPRESSION_SOURCES
-    src/core/unity_uabe/libCompression/lz4.c
-    src/core/unity_uabe/libCompression/lz4frame.c
-    src/core/unity_uabe/libCompression/lz4hc.c
-    src/core/unity_uabe/libCompression/xxhash.c
-    src/core/unity_uabe/libCompression/lz4dec.cpp
-    src/core/unity_uabe/libCompression/lz4enc.cpp
-    src/core/unity_uabe/libCompression/LzFind.c
-    src/core/unity_uabe/libCompression/LzFindMt.c
-    src/core/unity_uabe/libCompression/LzmaDec.c
-    src/core/unity_uabe/libCompression/LzmaEnc.c
-    src/core/unity_uabe/libCompression/Threads.c
+    third_party/unity_uabe/libCompression/lz4.c
+    third_party/unity_uabe/libCompression/lz4frame.c
+    third_party/unity_uabe/libCompression/lz4hc.c
+    third_party/unity_uabe/libCompression/xxhash.c
+    third_party/unity_uabe/libCompression/lz4dec.cpp
+    third_party/unity_uabe/libCompression/lz4enc.cpp
+    third_party/unity_uabe/libCompression/LzFind.c
+    third_party/unity_uabe/libCompression/LzFindMt.c
+    third_party/unity_uabe/libCompression/LzmaDec.c
+    third_party/unity_uabe/libCompression/LzmaEnc.c
+    third_party/unity_uabe/libCompression/Threads.c
 )
 
 add_library(maiconv_uabe_libCompression STATIC
     ${MAICONV_UABE_LIBCOMPRESSION_SOURCES}
 )
-target_include_directories(maiconv_uabe_libCompression PUBLIC src/core/unity_uabe/libCompression)
+target_include_directories(maiconv_uabe_libCompression PUBLIC third_party/unity_uabe/libCompression)
 if(NOT WIN32)
     target_link_libraries(maiconv_uabe_libCompression PUBLIC Threads::Threads)
 endif()
 
 add_library(maiconv_uabe_libStringConverter STATIC
-    src/core/unity_uabe/libStringConverter/convert.cpp
+    third_party/unity_uabe/libStringConverter/convert.cpp
 )
-target_include_directories(maiconv_uabe_libStringConverter PUBLIC src/core/unity_uabe/libStringConverter)
+target_include_directories(maiconv_uabe_libStringConverter PUBLIC third_party/unity_uabe/libStringConverter)
 
 add_library(maiconv_uabe_assetstools STATIC
-    src/core/unity_uabe/AssetsTools/AssetBundleFileFormat.cpp
-    src/core/unity_uabe/AssetsTools/AssetBundleFileTable.cpp
-    src/core/unity_uabe/AssetsTools/AssetsFileFormat.cpp
-    src/core/unity_uabe/AssetsTools/AssetsFileReader.cpp
-    src/core/unity_uabe/AssetsTools/AssetsFileTable.cpp
-    src/core/unity_uabe/AssetsTools/AssetsReplacer.cpp
-    src/core/unity_uabe/AssetsTools/AssetTypeClass.cpp
-    src/core/unity_uabe/AssetsTools/BundleReplacer.cpp
-    src/core/unity_uabe/AssetsTools/ClassDatabaseFile.cpp
+    third_party/unity_uabe/AssetsTools/AssetBundleFileFormat.cpp
+    third_party/unity_uabe/AssetsTools/AssetBundleFileTable.cpp
+    third_party/unity_uabe/AssetsTools/AssetsFileFormat.cpp
+    third_party/unity_uabe/AssetsTools/AssetsFileReader.cpp
+    third_party/unity_uabe/AssetsTools/AssetsFileTable.cpp
+    third_party/unity_uabe/AssetsTools/AssetsReplacer.cpp
+    third_party/unity_uabe/AssetsTools/AssetTypeClass.cpp
+    third_party/unity_uabe/AssetsTools/BundleReplacer.cpp
+    third_party/unity_uabe/AssetsTools/ClassDatabaseFile.cpp
 )
-target_include_directories(maiconv_uabe_assetstools PUBLIC src/core/unity_uabe/AssetsTools)
+target_include_directories(maiconv_uabe_assetstools PUBLIC third_party/unity_uabe/AssetsTools)
 target_compile_definitions(maiconv_uabe_assetstools PUBLIC
     ASSETSTOOLS_IMPORTSTATIC
     UNICODE
@@ -246,24 +193,24 @@ add_library(MaiConv_core
     src/core/unity_assetbundle.cpp
     src/core/simai.cpp
     src/core/assets.cpp
-    src/core/unity_uabe/Texture/lodepng.cpp
+    third_party/unity_uabe/Texture/lodepng.cpp
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
     set_source_files_properties(
-        src/core/unity_uabe/Texture/lodepng.cpp
+        third_party/unity_uabe/Texture/lodepng.cpp
         PROPERTIES
         COMPILE_OPTIONS "-w"
     )
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set_source_files_properties(
-        src/core/unity_uabe/Texture/lodepng.cpp
+        third_party/unity_uabe/Texture/lodepng.cpp
         PROPERTIES
         COMPILE_OPTIONS "-w"
     )
 elseif(MSVC)
     set_source_files_properties(
-        src/core/unity_uabe/Texture/lodepng.cpp
+        third_party/unity_uabe/Texture/lodepng.cpp
         PROPERTIES
         COMPILE_OPTIONS "/w"
     )
@@ -273,8 +220,9 @@ target_include_directories(MaiConv_core PUBLIC include)
 target_include_directories(MaiConv_core PRIVATE
     third_party/vgmstream/src
     third_party/shine/src/lib
-    src/core/unity_uabe/AssetsTools
-    src/core/unity_uabe/Texture
+    third_party/unity_uabe/AssetsTools
+    third_party/unity_uabe/Texture
+    third_party
 )
 target_compile_definitions(MaiConv_core PRIVATE
     MAICONV_SOURCE_DIR="${CMAKE_SOURCE_DIR}"

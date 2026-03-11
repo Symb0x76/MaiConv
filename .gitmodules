@@ -1,9 +1,6 @@
 [submodule "third_party/shine"]
 	path = third_party/shine
 	url = https://github.com/toots/shine.git
-[submodule "third_party/vgmstream"]
-	path = third_party/vgmstream
-	url = https://github.com/vgmstream/vgmstream.git
 [submodule "third_party/CLI11"]
 	path = third_party/CLI11
 	url = https://github.com/CLIUtils/CLI11.git
