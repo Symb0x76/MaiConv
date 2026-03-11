@@ -488,13 +488,51 @@ std::string path_to_utf8(const std::filesystem::path &path) {
 
 std::string category_name_for_layout(const TrackInfo &info,
                                      AssetsExportLayout layout) {
+  const auto normalize_layout_genre = [](std::string_view genre) {
+    static const std::array<std::pair<std::string_view, std::string_view>, 4>
+        kGenreMappings = {{
+            {"POPSアニメ", "POPS＆アニメ"},
+            {"niconicoボーカロイド", "niconico＆ボーカロイド"},
+            {"ゲームバラエティ", "ゲーム&バラエティ"},
+            {"オンゲキCHUNITHM", "オンゲキ&CHUNITHM"},
+        }};
+    for (const auto &[from, to] : kGenreMappings) {
+      if (genre == from) {
+        return std::string(to);
+      }
+    }
+    return std::string(genre);
+  };
+
+  const auto normalize_layout_version = [](std::string version) {
+    if (version.empty()) {
+      return version;
+    }
+    constexpr std::string_view kSuffix = "PLUS";
+    if (version.size() < kSuffix.size()) {
+      return version;
+    }
+
+    const std::size_t pos = version.size() - kSuffix.size();
+    if (version.compare(pos, kSuffix.size(), kSuffix) != 0) {
+      return version;
+    }
+    if (pos > 0 && version[pos - 1] == ' ') {
+      return version;
+    }
+
+    version.insert(pos, " ");
+    return version;
+  };
+
   switch (layout) {
   case AssetsExportLayout::Flat:
     return "";
   case AssetsExportLayout::Genre:
-    return info.genre.empty() ? "Unknown" : info.genre;
+    return info.genre.empty() ? "Unknown" : normalize_layout_genre(info.genre);
   case AssetsExportLayout::Version:
-    return info.version.empty() ? "Unknown" : info.version;
+    return info.version.empty() ? "Unknown"
+                                : normalize_layout_version(info.version);
   }
   return "";
 }

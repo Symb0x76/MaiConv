@@ -282,7 +282,8 @@ TEST_CASE("assets supports genre/version layout") {
   const fs::path out_version = temp_root / "out_version";
 
   fs::create_directories(assets_root);
-  create_track(assets_root / "A000", "000123", "LayoutSong", "POPS", "BUDDIES");
+  create_track(assets_root / "A000", "000123", "LayoutSong", "POPSアニメ",
+               "BUDDIESPLUS");
 
   AssetsOptions by_genre;
   by_genre.streaming_assets_path = assets_root;
@@ -292,7 +293,14 @@ TEST_CASE("assets supports genre/version layout") {
   by_genre.music_id_folder_name = true;
 
   REQUIRE(run_compile_assets(by_genre) == 0);
-  REQUIRE(fs::exists(out_genre / "POPS" / "000123" / "result.ma2"));
+  std::vector<fs::path> genre_dirs;
+  for (const auto &entry : fs::directory_iterator(out_genre)) {
+    if (entry.is_directory()) {
+      genre_dirs.push_back(entry.path());
+    }
+  }
+  REQUIRE(genre_dirs.size() == 1);
+  REQUIRE(fs::exists(genre_dirs.front() / "000123" / "result.ma2"));
 
   AssetsOptions by_version;
   by_version.streaming_assets_path = assets_root;
@@ -302,7 +310,18 @@ TEST_CASE("assets supports genre/version layout") {
   by_version.music_id_folder_name = true;
 
   REQUIRE(run_compile_assets(by_version) == 0);
-  REQUIRE(fs::exists(out_version / "BUDDIES" / "000123" / "result.ma2"));
+  std::vector<fs::path> version_dirs;
+  for (const auto &entry : fs::directory_iterator(out_version)) {
+    if (entry.is_directory()) {
+      version_dirs.push_back(entry.path());
+    }
+  }
+  REQUIRE(version_dirs.size() == 1);
+  const std::string version_folder_name =
+      version_dirs.front().filename().string();
+  REQUIRE(version_folder_name.find("PLUS") != std::string::npos);
+  REQUIRE(version_folder_name.find(" PLUS") != std::string::npos);
+  REQUIRE(fs::exists(version_dirs.front() / "000123" / "result.ma2"));
 
   fs::remove_all(temp_root);
 }
