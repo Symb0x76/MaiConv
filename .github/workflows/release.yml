@@ -1,0 +1,132 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag (example: v1.2.3)"
+        required: true
+        type: string
+      target_ref:
+        description: "Git ref to release from (branch/tag/commit)"
+        required: false
+        default: "master"
+        type: string
+      changelog:
+        description: "Detailed changelog (Markdown supported)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: ubuntu
+            asset_name: MaiConv-ubuntu-x64
+          - os: windows-latest
+            label: windows
+            asset_name: MaiConv-windows-x64.exe
+          - os: macos-latest
+            label: macos
+            asset_name: MaiConv-macos-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.ref }}
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Install FFmpeg prerequisites (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm yasm pkg-config libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+
+      - name: Install FFmpeg prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install ffmpeg pkg-config nasm yasm
+
+      - name: Clean build directory
+        run: cmake -E rm -rf build/default
+
+      - name: Configure
+        run: cmake --preset default
+
+      - name: Build executable
+        run: cmake --build --preset default --target MaiConv --parallel
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item "build/default/MaiConv.exe" "dist/${{ matrix.asset_name }}"
+
+      - name: Package binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp build/default/MaiConv dist/${{ matrix.asset_name }}
+          chmod +x dist/${{ matrix.asset_name }}
+
+      - name: Smoke test binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "dist/${{ matrix.asset_name }}" --help | Out-Null
+
+      - name: Smoke test binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          ./dist/${{ matrix.asset_name }} --help > /dev/null
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.label }}
+          path: dist/${{ matrix.asset_name }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || inputs.tag_name }}
+          target_commitish: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.sha }}
+          body: ${{ github.event_name == 'workflow_dispatch' && inputs.changelog || format('Automated release build for tag {0}.\n\nYou can edit this draft to add detailed changelog before publishing.', github.ref_name) }}
+          draft: ${{ github.event_name == 'push' }}
+          generate_release_notes: ${{ github.event_name == 'push' }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
