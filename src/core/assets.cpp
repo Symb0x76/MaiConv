@@ -723,8 +723,6 @@ std::string compose_maidata_document(const TrackInfo &info,
   out << "&versionid=" << info.version_id << "\n";
   out << "&version=" << normalize_maidata_metadata_value(info.version) << "\n";
   out << "&chartconverter=maiconv\n";
-  out << "&ChartConvertTool=maiconv\n";
-  out << "&ChartConvertToolVersion=dev\n";
 
   for (const auto &[diff, body] : inotes) {
     const auto difficulty_meta = info.difficulties.find(diff);
