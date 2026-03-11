@@ -697,8 +697,10 @@ TEST_CASE("assets maidata normalizes genre labels and preserves special title "
   options.format = ChartFormat::Maidata;
 
   REQUIRE(run_compile_assets(options) == 0);
-  const std::string maidata =
-      read_text_file(output_root / "012340_Rock & Roll_ [DX]" / "maidata.txt");
+  const std::string expected_folder =
+      "012340_" + sanitize_folder_name("Rock & Roll? [DX]");
+  const std::string maidata = read_text_file(
+      append_utf8_path(output_root, expected_folder) / "maidata.txt");
   REQUIRE(maidata.find("&title=Rock & Roll? [DX]") != std::string::npos);
   REQUIRE(maidata.find("&genre=ゲーム&バラエティ") != std::string::npos);
 
