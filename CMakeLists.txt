@@ -90,41 +90,43 @@ function(maiconv_patch_vgmstream_ffmpeg)
     endif()
 
     file(READ "${ffmpeg_cmake}" ffmpeg_content)
-    string(FIND "${ffmpeg_content}" "if(NOT APPLE)" ffmpeg_has_apple_guard)
-    string(FIND "${ffmpeg_content}" "--extra-cflags=--static" ffmpeg_has_static_cflags)
-    if(ffmpeg_has_static_cflags EQUAL -1)
-        return()
-    endif()
-    if(NOT ffmpeg_has_apple_guard EQUAL -1)
-        return()
-    endif()
+    if(APPLE)
+        string(FIND "${ffmpeg_content}" "--extra-cflags=--static" ffmpeg_has_static_cflags)
+        if(ffmpeg_has_static_cflags EQUAL -1)
+            return()
+        endif()
 
-    set(ffmpeg_old_block
-        "                --enable-swresample
-                --extra-libs=-static
-                --extra-cflags=--static
-                --pkg-config-flags=--static
-            )")
-    set(ffmpeg_new_block
-        "                --enable-swresample
-            )
-            if(NOT APPLE)
-                list(APPEND FFMPEG_CONF_ARGS
-                    --extra-libs=-static
-                    --extra-cflags=--static
-                    --pkg-config-flags=--static
-                )
-            endif()")
+        string(REPLACE "--extra-libs=-static" "" ffmpeg_content "${ffmpeg_content}")
+        string(REPLACE "--extra-cflags=--static" "" ffmpeg_content "${ffmpeg_content}")
+        string(REPLACE "--pkg-config-flags=--static" "" ffmpeg_content "${ffmpeg_content}")
 
-    string(FIND "${ffmpeg_content}" "${ffmpeg_old_block}" ffmpeg_patch_pos)
-    if(ffmpeg_patch_pos EQUAL -1)
-        message(STATUS "Skipped vgmstream ffmpeg auto-patch: expected block not found in ${ffmpeg_cmake}")
+        file(WRITE "${ffmpeg_cmake}" "${ffmpeg_content}")
+        message(STATUS "Applied Apple ffmpeg static-flag patch for vgmstream")
+    endif()
+endfunction()
+
+function(maiconv_patch_vgmstream_linkage)
+    set(vgmstream_src_cmake "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vgmstream/src/CMakeLists.txt")
+    if(NOT EXISTS "${vgmstream_src_cmake}")
+        message(WARNING "vgmstream src CMakeLists not found: ${vgmstream_src_cmake}")
         return()
     endif()
 
-    string(REPLACE "${ffmpeg_old_block}" "${ffmpeg_new_block}" ffmpeg_content "${ffmpeg_content}")
-    file(WRITE "${ffmpeg_cmake}" "${ffmpeg_content}")
-    message(STATUS "Applied local vgmstream ffmpeg compatibility patch")
+    file(READ "${vgmstream_src_cmake}" vgmstream_src_content)
+    string(FIND "${vgmstream_src_content}" "setup_target(libvgmstream TRUE)" vgmstream_linkage_ok)
+    if(NOT vgmstream_linkage_ok EQUAL -1)
+        return()
+    endif()
+
+    string(FIND "${vgmstream_src_content}" "setup_target(libvgmstream)" vgmstream_linkage_old)
+    if(vgmstream_linkage_old EQUAL -1)
+        message(STATUS "Skipped vgmstream linkage auto-patch: target pattern not found in ${vgmstream_src_cmake}")
+        return()
+    endif()
+
+    string(REPLACE "setup_target(libvgmstream)" "setup_target(libvgmstream TRUE)" vgmstream_src_content "${vgmstream_src_content}")
+    file(WRITE "${vgmstream_src_cmake}" "${vgmstream_src_content}")
+    message(STATUS "Applied vgmstream static-link dependency patch")
 endfunction()
 
 set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -169,6 +171,7 @@ set(USE_CELT OFF CACHE BOOL "" FORCE)
 set(USE_SPEEX OFF CACHE BOOL "" FORCE)
 
 maiconv_patch_vgmstream_ffmpeg()
+maiconv_patch_vgmstream_linkage()
 
 add_subdirectory(third_party/vgmstream third_party/vgmstream-build EXCLUDE_FROM_ALL)
 
