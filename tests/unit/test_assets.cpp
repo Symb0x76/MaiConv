@@ -269,7 +269,7 @@ TEST_CASE("assets scans all subdirectories under assets root in flat layout") {
 
   const int rc = run_compile_assets(options);
   REQUIRE(rc == 0);
-  REQUIRE(fs::exists(output_root / "000001_One" / "maidata.txt"));
+  REQUIRE_FALSE(fs::exists(output_root / "000001_One" / "maidata.txt"));
   REQUIRE(fs::exists(output_root / "000002_Two" / "maidata.txt"));
 
   fs::remove_all(temp_root);
@@ -550,6 +550,36 @@ TEST_CASE("assets exports selected id with all difficulties when difficulty is "
 
   const std::string maidata =
       read_text_file(output_root / "000777_SelectMe" / "maidata.txt");
+  REQUIRE(maidata.find("&inote_2=") != std::string::npos);
+  REQUIRE(maidata.find("&inote_3=") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets exports selected music id 114514 only") {
+  const fs::path temp_root = unique_temp_dir("assets_id_114514");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A000", "114514", "TargetSong", "POPS", "PRISM",
+               {2, 3});
+  create_track(assets_root / "A000", "000888", "IgnoreMe", "POPS", "PRISM",
+               {3});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.target_music_id = "114514";
+  options.music_id_folder_name = true;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "114514" / "maidata.txt"));
+  REQUIRE_FALSE(fs::exists(output_root / "000888"));
+
+  const std::string maidata =
+      read_text_file(output_root / "114514" / "maidata.txt");
   REQUIRE(maidata.find("&inote_2=") != std::string::npos);
   REQUIRE(maidata.find("&inote_3=") != std::string::npos);
 
