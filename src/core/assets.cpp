@@ -507,8 +507,8 @@ std::string category_name_for_layout(const TrackInfo &info,
   const auto normalize_layout_genre = [](std::string_view genre) {
     static const std::array<std::pair<std::string_view, std::string_view>, 4>
         kGenreMappings = {{
-            {"POPSアニメ", "POPS＆アニメ"},
-            {"niconicoボーカロイド", "niconico＆ボーカロイド"},
+            {"POPSアニメ", "POPS&アニメ"},
+            {"niconicoボーカロイド", "niconico&ボーカロイド"},
             {"ゲームバラエティ", "ゲーム&バラエティ"},
             {"オンゲキCHUNITHM", "オンゲキ&CHUNITHM"},
         }};
@@ -583,8 +583,8 @@ std::string json_escape(const std::string &value) {
 std::string normalize_maidata_genre(std::string_view genre) {
   static const std::array<std::pair<std::string_view, std::string_view>, 4>
       kGenreMappings = {{
-          {"POPSアニメ", "POPS＆アニメ"},
-          {"niconicoボーカロイド", "niconico＆ボーカロイド"},
+          {"POPSアニメ", "POPS&アニメ"},
+          {"niconicoボーカロイド", "niconico&ボーカロイド"},
           {"ゲームバラエティ", "ゲーム&バラエティ"},
           {"オンゲキCHUNITHM", "オンゲキ&CHUNITHM"},
       }};
