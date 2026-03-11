@@ -428,18 +428,6 @@ int infer_output_difficulty(const TrackInfo &info,
   return infer_inote_index(ma2_file, zero_based_difficulty);
 }
 
-std::filesystem::path
-find_asset_candidate(const std::filesystem::path &base,
-                     const std::vector<std::string> &names) {
-  for (const auto &name : names) {
-    const auto candidate = base / name;
-    if (std::filesystem::exists(candidate)) {
-      return candidate;
-    }
-  }
-  return {};
-}
-
 std::vector<std::filesystem::path>
 detect_asset_bases(const std::vector<std::filesystem::path> &source_roots,
                    const std::string &folder_name) {
@@ -456,13 +444,41 @@ detect_asset_bases(const std::vector<std::filesystem::path> &source_roots,
   return bases;
 }
 
-std::filesystem::path
-find_asset_candidate_in_bases(const std::vector<std::filesystem::path> &bases,
-                              const std::vector<std::string> &names) {
+using AssetIndex = std::unordered_map<std::string, std::filesystem::path>;
+
+std::vector<AssetIndex>
+build_asset_indexes(const std::vector<std::filesystem::path> &bases) {
+  std::vector<AssetIndex> indexes;
+  indexes.reserve(bases.size());
+
   for (const auto &base : bases) {
-    const auto found = find_asset_candidate(base, names);
-    if (!found.empty()) {
-      return found;
+    AssetIndex index;
+    if (std::filesystem::exists(base) && std::filesystem::is_directory(base)) {
+      for (const auto &entry :
+           std::filesystem::recursive_directory_iterator(base)) {
+        if (!entry.is_regular_file()) {
+          continue;
+        }
+        const auto relative =
+            entry.path().lexically_relative(base).generic_string();
+        index.emplace(lower(relative), entry.path());
+      }
+    }
+    indexes.push_back(std::move(index));
+  }
+
+  return indexes;
+}
+
+std::filesystem::path
+find_asset_candidate_in_indexes(const std::vector<AssetIndex> &indexes,
+                                const std::vector<std::string> &names) {
+  for (const auto &index : indexes) {
+    for (const auto &name : names) {
+      const auto it = index.find(lower(name));
+      if (it != index.end()) {
+        return it->second;
+      }
     }
   }
   return {};
@@ -835,6 +851,10 @@ int run_compile_assets(const AssetsOptions &options) {
       video_bases = detect_asset_bases(source_roots, "MovieData");
     }
 
+    const auto music_indexes = build_asset_indexes(music_bases);
+    const auto cover_indexes = build_asset_indexes(cover_bases);
+    const auto video_indexes = build_asset_indexes(video_bases);
+
     std::vector<std::filesystem::path> folders;
     for (const auto &root : source_roots) {
       const auto music_root = root / "music";
@@ -1017,8 +1037,8 @@ int run_compile_assets(const AssetsOptions &options) {
           compressed_audio_names.push_back(base_name + ".ogg");
         }
 
-        const auto compressed_audio =
-            find_asset_candidate_in_bases(music_bases, compressed_audio_names);
+        const auto compressed_audio = find_asset_candidate_in_indexes(
+            music_indexes, compressed_audio_names);
         if (!compressed_audio.empty()) {
           const std::string ext = lower(compressed_audio.extension().string());
           if (ext == ".mp3") {
@@ -1044,9 +1064,9 @@ int run_compile_assets(const AssetsOptions &options) {
           }
 
           const auto acb_source =
-              find_asset_candidate_in_bases(music_bases, acb_names);
+              find_asset_candidate_in_indexes(music_indexes, acb_names);
           const auto awb_source =
-              find_asset_candidate_in_bases(music_bases, awb_names);
+              find_asset_candidate_in_indexes(music_indexes, awb_names);
           if (!acb_source.empty() && !awb_source.empty()) {
             if (!convert_acb_awb_to_mp3(acb_source, awb_source,
                                         track_output / "track.mp3")) {
@@ -1085,7 +1105,7 @@ int run_compile_assets(const AssetsOptions &options) {
         }
 
         const auto cover_image =
-            find_asset_candidate_in_bases(cover_bases, image_names);
+            find_asset_candidate_in_indexes(cover_indexes, image_names);
         if (!cover_image.empty()) {
           std::string ext = lower(cover_image.extension().string());
           if (ext.empty()) {
@@ -1096,7 +1116,7 @@ int run_compile_assets(const AssetsOptions &options) {
               std::filesystem::copy_options::overwrite_existing);
         } else {
           const auto cover_ab =
-              find_asset_candidate_in_bases(cover_bases, ab_names);
+              find_asset_candidate_in_indexes(cover_indexes, ab_names);
           if (!cover_ab.empty()) {
             const auto pseudo_image_ext =
                 detect_image_extension_by_magic(cover_ab);
@@ -1139,17 +1159,17 @@ int run_compile_assets(const AssetsOptions &options) {
         }
 
         auto video_source =
-            find_asset_candidate_in_bases(video_bases, video_mp4_names);
+            find_asset_candidate_in_indexes(video_indexes, video_mp4_names);
         if (!video_source.empty()) {
           std::filesystem::copy_file(
               video_source, track_output / "pv.mp4",
               std::filesystem::copy_options::overwrite_existing);
         } else {
           video_source =
-              find_asset_candidate_in_bases(video_bases, video_dat_names);
+              find_asset_candidate_in_indexes(video_indexes, video_dat_names);
           if (video_source.empty()) {
             video_source =
-                find_asset_candidate_in_bases(video_bases, video_usm_names);
+                find_asset_candidate_in_indexes(video_indexes, video_usm_names);
           }
 
           if (video_source.empty()) {
