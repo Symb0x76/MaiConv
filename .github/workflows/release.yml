@@ -114,6 +114,13 @@ jobs:
     needs: build
 
     steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+        ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.ref }}
+
     - name: Download release artifacts
       uses: actions/download-artifact@v4
       with:
@@ -122,8 +129,15 @@ jobs:
 
     - name: Prepare release notes
       id: changelog
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        INPUT_CHANGELOG: ${{ inputs.changelog }}
       run: |
-        if [ -f "CHANGELOG.md" ]; then
+        if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_CHANGELOG" ]; then
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          printf "%s\n" "$INPUT_CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        elif [ -f "CHANGELOG.md" ]; then
           echo "changelog<<EOF" >> $GITHUB_OUTPUT
           cat CHANGELOG.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
