@@ -38,14 +38,32 @@ ctest --preset default
 
 ## FFmpeg 依赖说明
 
-`maiconv media` 的视频相关功能依赖系统中的 `ffmpeg` 可执行文件（在 `PATH` 中可直接调用）。
+`maiconv media` 的视频相关功能现在支持两种后端：
+- 进程内 `libav` 后端（优先）：当 `MAICONV_ENABLE_LIBAV_TRANSCODE=ON` 且在配置阶段检测到 FFmpeg 开发库时启用。
+- 外部 `ffmpeg` 后端（回退）：当进程内 `libav` 不可用时自动使用。
+
+默认构建行为：
+- `MAICONV_ENABLE_LIBAV_TRANSCODE=ON`（自动检测）
+- 若检测失败，MaiConv 会回退到外部 `ffmpeg`，功能保持可用
+
+构建示例：
+
+```bash
+# 默认（自动检测进程内 libav）
+cmake --preset default
+
+# 强制回退后端（禁用进程内 libav）
+cmake --preset nolibav
+# 或：cmake -S . -B build/nolibav -G Ninja -DMAICONV_ENABLE_LIBAV_TRANSCODE=OFF
+```
+
+外部 `ffmpeg` 后端要求：
+- `ffmpeg` 可执行文件在 `PATH` 中可调用，或通过 `MAICONV_FFMPEG` 指向绝对路径
+- `ffprobe` 可选（便于手工排查媒体流信息）
 
 必需能力（按功能划分）：
 - `dat/usm -> mp4`：需要 `libx264` 编码器（MaiConv 会把 VP9 IVF 转码为 H.264 MP4）
 - `mp4 -> dat`（含有模板与无模板两种路径）：需要 `libvpx-vp9` 编码器（MaiConv 会先转码为 VP9 IVF）
-
-建议同时具备：
-- `ffprobe`（用于手工排查媒体流信息；MaiConv 运行时不强依赖）
 
 快速自检（Windows PowerShell）：
 
@@ -183,12 +201,12 @@ assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
 - `acb + awb -> track.mp3`（内置 `libvgmstream` + `shine`）
 - `ab -> bg.png`（内置 PNG 提取）
 - `dat/usm -> pv.mp4`
-  - 仅支持 VP9 流；通过 `PATH` 中的 `ffmpeg` 转码为 H.264 MP4
+  - 仅支持 VP9 流；优先使用进程内 `libav` 转码，缺失时回退到外部 `ffmpeg`
 - `mp4 + template(dat/usm) -> pv.dat`
-  - 先转码为 VP9 IVF，再按模板 DAT/USM 的视频包结构回填并走逆向加密写回
+  - 先转码为 VP9 IVF（进程内 `libav` 或外部 `ffmpeg` 回退），再按模板 DAT/USM 的视频包结构回填并走逆向加密写回
 - `mp4 -> pv.dat`（无模板）
-  - 先转码为 VP9 IVF，再由 MaiConv 内置 C++ 打包器生成 DAT（`@SFV` 分包 + 同步加密）
-  - 该模式仅需环境中可用 `ffmpeg`（需支持 `libvpx-vp9` 编码）
+  - 先转码为 VP9 IVF（进程内 `libav` 或外部 `ffmpeg` 回退），再由 MaiConv 内置 C++ 打包器生成 DAT（`@SFV` 分包 + 同步加密）
+  - 回退模式要求环境中可用 `ffmpeg`（需支持 `libvpx-vp9` 编码）
 
 若转换失败，不再保留原始素材文件；该曲目会被标记为 `_Incomplete`（未使用 `--ignore` 时则直接失败），并将失败的源/目标路径写入 `_log.txt`。
 

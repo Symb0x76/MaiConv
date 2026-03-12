@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -12,6 +13,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 using namespace maiconv;
 
@@ -59,12 +65,20 @@ const std::string kMetaGenreIdMock104 = kMetaGenreIdPrefix + "104";
 const std::string kMetaVersionIdMock23 = kMetaVersionIdPrefix + "23";
 
 fs::path unique_temp_dir(const std::string &prefix) {
+  static std::atomic<unsigned long long> counter{0};
   const auto stamp =
       std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch())
           .count();
+  const auto seq = counter.fetch_add(1, std::memory_order_relaxed);
+#if defined(_WIN32)
+  const auto pid = static_cast<unsigned long long>(_getpid());
+#else
+  const auto pid = static_cast<unsigned long long>(getpid());
+#endif
   const fs::path dir = fs::temp_directory_path() /
-                       ("maiconv_" + prefix + "_" + std::to_string(stamp));
+                       ("maiconv_" + prefix + "_" + std::to_string(pid) + "_" +
+                        std::to_string(stamp) + "_" + std::to_string(seq));
   fs::create_directories(dir);
   return dir;
 }
@@ -410,6 +424,147 @@ TEST_CASE("assets quiet log level suppresses per-track output") {
   REQUIRE(out.find("Incomplete:") == std::string::npos);
   REQUIRE(out.find("Total music compiled: 1") != std::string::npos);
   REQUIRE(captured_err.str().empty());
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets supports bounded parallel workers for track export") {
+  const fs::path temp_root = unique_temp_dir("assets_parallel_workers");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A010", "000222", "ParallelA", "POPS", "PRISM",
+               {2, 3});
+  create_track(assets_root / "A011", "000333", "ParallelB", "ANIME", "PRISM",
+               {3, 4});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.jobs = 2;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "000222_ParallelA" / "maidata.txt"));
+  REQUIRE(fs::exists(output_root / "000333_ParallelB" / "maidata.txt"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets timing output can be enabled explicitly") {
+  const fs::path temp_root = unique_temp_dir("assets_timing_output");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A020", "000444", "TimingSong", "POPS", "PRISM");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.enable_timing = true;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int result = run_compile_assets(options);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  REQUIRE(result == 0);
+  const std::string err = captured_err.str();
+  REQUIRE(err.find("Timing summary (ms):") != std::string::npos);
+  REQUIRE(err.find("source_scan:") != std::string::npos);
+  REQUIRE(err.find("index_build:") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets metadata xml cache is reused on repeated runs") {
+  const fs::path temp_root = unique_temp_dir("assets_metadata_cache");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_first = temp_root / "output_first";
+  const fs::path output_second = temp_root / "output_second";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A030", "000555", "CacheSong", "GAME", "PRISM");
+
+  AssetsOptions first;
+  first.streaming_assets_path = assets_root;
+  first.output_path = output_first;
+  first.format = ChartFormat::Simai;
+  first.enable_timing = true;
+
+  std::ostringstream first_out;
+  std::ostringstream first_err;
+  auto *old_first_out = std::cout.rdbuf(first_out.rdbuf());
+  auto *old_first_err = std::cerr.rdbuf(first_err.rdbuf());
+  const int first_result = run_compile_assets(first);
+  std::cout.rdbuf(old_first_out);
+  std::cerr.rdbuf(old_first_err);
+  REQUIRE(first_result == 0);
+  REQUIRE(first_err.str().find("metadata_cache: hits=0, misses=1") !=
+          std::string::npos);
+
+  AssetsOptions second = first;
+  second.output_path = output_second;
+
+  std::ostringstream second_out;
+  std::ostringstream second_err;
+  auto *old_second_out = std::cout.rdbuf(second_out.rdbuf());
+  auto *old_second_err = std::cerr.rdbuf(second_err.rdbuf());
+  const int second_result = run_compile_assets(second);
+  std::cout.rdbuf(old_second_out);
+  std::cerr.rdbuf(old_second_err);
+  REQUIRE(second_result == 0);
+  REQUIRE(second_err.str().find("metadata_cache: hits=1, misses=0") !=
+          std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets index cache is reused on repeated runs") {
+  const fs::path temp_root = unique_temp_dir("assets_index_cache");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A031", "000556", "IndexCacheSong", "POPS",
+               "PRISM");
+  create_media_assets(assets_root / "A031", "000556");
+
+  AssetsOptions first;
+  first.streaming_assets_path = assets_root;
+  first.output_path = output_root;
+  first.format = ChartFormat::Simai;
+  first.enable_timing = true;
+
+  std::ostringstream first_out;
+  std::ostringstream first_err;
+  auto *old_first_out = std::cout.rdbuf(first_out.rdbuf());
+  auto *old_first_err = std::cerr.rdbuf(first_err.rdbuf());
+  const int first_result = run_compile_assets(first);
+  std::cout.rdbuf(old_first_out);
+  std::cerr.rdbuf(old_first_err);
+  REQUIRE(first_result == 0);
+  REQUIRE(first_err.str().find("asset_index_cache: hits=0, misses=3") !=
+          std::string::npos);
+
+  AssetsOptions second = first;
+
+  std::ostringstream second_out;
+  std::ostringstream second_err;
+  auto *old_second_out = std::cout.rdbuf(second_out.rdbuf());
+  auto *old_second_err = std::cerr.rdbuf(second_err.rdbuf());
+  const int second_result = run_compile_assets(second);
+  std::cout.rdbuf(old_second_out);
+  std::cerr.rdbuf(old_second_err);
+  REQUIRE(second_result == 0);
+  REQUIRE(second_err.str().find("asset_index_cache: hits=3, misses=0") !=
+          std::string::npos);
 
   fs::remove_all(temp_root);
 }

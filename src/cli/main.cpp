@@ -13,307 +13,323 @@
 
 namespace {
 
-  constexpr int kSuccess = 0;
-  constexpr int kFailure = 2;
+constexpr int kSuccess = 0;
+constexpr int kFailure = 2;
 
-  std::filesystem::path resolve_output_path(const std::string& output, const std::string& default_file_name) {
-    std::filesystem::path out(output);
-    if (out.extension().empty()) {
-      return out / default_file_name;
-    }
-    return out;
+std::filesystem::path
+resolve_output_path(const std::string &output,
+                    const std::string &default_file_name) {
+  std::filesystem::path out(output);
+  if (out.extension().empty()) {
+    return out / default_file_name;
   }
+  return out;
+}
 
-  std::filesystem::path resolve_binary_output_path(const std::string& output, const std::string& default_file_name) {
-    if (output.empty()) {
-      return std::filesystem::current_path() / default_file_name;
-    }
-    return resolve_output_path(output, default_file_name);
+std::filesystem::path
+resolve_binary_output_path(const std::string &output,
+                           const std::string &default_file_name) {
+  if (output.empty()) {
+    return std::filesystem::current_path() / default_file_name;
   }
+  return resolve_output_path(output, default_file_name);
+}
 
-  void write_or_stdout(const std::string& output, const std::string& default_file_name, const std::string& payload) {
-    if (output.empty()) {
-      std::cout << payload;
-      if (payload.empty() || payload.back() != '\n') {
-        std::cout << "\n";
-      }
-      return;
+void write_or_stdout(const std::string &output,
+                     const std::string &default_file_name,
+                     const std::string &payload) {
+  if (output.empty()) {
+    std::cout << payload;
+    if (payload.empty() || payload.back() != '\n') {
+      std::cout << "\n";
     }
-    const auto target = resolve_output_path(output, default_file_name);
-    maiconv::write_text_file(target, payload);
-    std::cout << "Successfully compiled at: " << target.string() << "\n";
+    return;
   }
+  const auto target = resolve_output_path(output, default_file_name);
+  maiconv::write_text_file(target, payload);
+  std::cout << "Successfully compiled at: " << target.string() << "\n";
+}
 
-  int run_ma2_to(const std::filesystem::path& input,
-    maiconv::ChartFormat format,
-    const std::optional<maiconv::FlipMethod>& rotate,
-    int shift_ticks,
-    const std::string& output) {
-    try {
-      maiconv::Ma2Tokenizer tokenizer;
-      maiconv::Ma2Parser parser;
-      maiconv::Ma2Composer ma2_composer;
-      maiconv::SimaiComposer simai_composer;
+int run_ma2_to(const std::filesystem::path &input, maiconv::ChartFormat format,
+               const std::optional<maiconv::FlipMethod> &rotate,
+               int shift_ticks, const std::string &output) {
+  try {
+    maiconv::Ma2Tokenizer tokenizer;
+    maiconv::Ma2Parser parser;
+    maiconv::Ma2Composer ma2_composer;
+    maiconv::SimaiComposer simai_composer;
 
-      maiconv::Chart chart = parser.parse(tokenizer.tokenize_file(input));
-      if (rotate.has_value()) {
-        chart.rotate(*rotate);
-      }
-      if (shift_ticks != 0) {
-        chart.shift_by_offset(shift_ticks);
-      }
-
-      std::string result;
-      std::string file_name;
-      if (format == maiconv::ChartFormat::Simai || format == maiconv::ChartFormat::SimaiFes) {
-        result = simai_composer.compose_chart(chart);
-        file_name = "maidata.txt";
-      }
-      else if (format == maiconv::ChartFormat::Maidata) {
-        result = "&inote_1=\n" + simai_composer.compose_chart(chart) + "\n";
-        file_name = "maidata.txt";
-      }
-      else {
-        result = ma2_composer.compose(chart, format);
-        file_name = "result.ma2";
-      }
-
-      write_or_stdout(output, file_name, result);
-      return kSuccess;
+    maiconv::Chart chart = parser.parse(tokenizer.tokenize_file(input));
+    if (rotate.has_value()) {
+      chart.rotate(*rotate);
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
+    if (shift_ticks != 0) {
+      chart.shift_by_offset(shift_ticks);
     }
+
+    std::string result;
+    std::string file_name;
+    if (format == maiconv::ChartFormat::Simai ||
+        format == maiconv::ChartFormat::SimaiFes) {
+      result = simai_composer.compose_chart(chart);
+      file_name = "maidata.txt";
+    } else if (format == maiconv::ChartFormat::Maidata) {
+      result = "&inote_1=\n" + simai_composer.compose_chart(chart) + "\n";
+      file_name = "maidata.txt";
+    } else {
+      result = ma2_composer.compose(chart, format);
+      file_name = "result.ma2";
+    }
+
+    write_or_stdout(output, file_name, result);
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_simai_to(const std::filesystem::path& input,
-    std::optional<int> difficulty,
-    maiconv::ChartFormat format,
-    const std::optional<maiconv::FlipMethod>& rotate,
-    int shift_ticks,
-    const std::string& output) {
-    try {
-      maiconv::SimaiTokenizer tokenizer;
-      maiconv::SimaiParser parser;
-      maiconv::Ma2Composer ma2_composer;
-      maiconv::SimaiComposer simai_composer;
+int run_simai_to(const std::filesystem::path &input,
+                 std::optional<int> difficulty, maiconv::ChartFormat format,
+                 const std::optional<maiconv::FlipMethod> &rotate,
+                 int shift_ticks, const std::string &output) {
+  try {
+    maiconv::SimaiTokenizer tokenizer;
+    maiconv::SimaiParser parser;
+    maiconv::Ma2Composer ma2_composer;
+    maiconv::SimaiComposer simai_composer;
 
-      const auto doc = tokenizer.parse_file(input);
-      const int diff = difficulty.value_or(1);
-      maiconv::Chart chart = parser.parse_document(doc, diff);
+    const auto doc = tokenizer.parse_file(input);
+    const int diff = difficulty.value_or(1);
+    maiconv::Chart chart = parser.parse_document(doc, diff);
 
-      if (rotate.has_value()) {
-        chart.rotate(*rotate);
-      }
-      if (shift_ticks != 0) {
-        chart.shift_by_offset(shift_ticks);
-      }
-
-      std::string result;
-      std::string file_name;
-      if (format == maiconv::ChartFormat::Simai || format == maiconv::ChartFormat::SimaiFes) {
-        result = simai_composer.compose_chart(chart);
-        file_name = "maidata.txt";
-      }
-      else if (format == maiconv::ChartFormat::Maidata) {
-        result = "&inote_" + std::to_string(diff) + "=\n" + simai_composer.compose_chart(chart) + "\n";
-        file_name = "maidata.txt";
-      }
-      else {
-        result = ma2_composer.compose(chart, format);
-        file_name = "result.ma2";
-      }
-
-      write_or_stdout(output, file_name, result);
-      return kSuccess;
+    if (rotate.has_value()) {
+      chart.rotate(*rotate);
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
+    if (shift_ticks != 0) {
+      chart.shift_by_offset(shift_ticks);
     }
+
+    std::string result;
+    std::string file_name;
+    if (format == maiconv::ChartFormat::Simai ||
+        format == maiconv::ChartFormat::SimaiFes) {
+      result = simai_composer.compose_chart(chart);
+      file_name = "maidata.txt";
+    } else if (format == maiconv::ChartFormat::Maidata) {
+      result = "&inote_" + std::to_string(diff) + "=\n" +
+               simai_composer.compose_chart(chart) + "\n";
+      file_name = "maidata.txt";
+    } else {
+      result = ma2_composer.compose(chart, format);
+      file_name = "result.ma2";
+    }
+
+    write_or_stdout(output, file_name, result);
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_audio_to_mp3(const std::filesystem::path& acb,
-    const std::filesystem::path& awb,
-    const std::string& output) {
-    try {
-      const auto target = resolve_binary_output_path(output, "track.mp3");
-      if (!maiconv::convert_acb_awb_to_mp3(acb, awb, target)) {
-        throw std::runtime_error("Audio conversion failed: " + acb.string() + " + " + awb.string() + " -> " +
-          target.string());
-      }
-      std::cout << "Successfully converted at: " << target.string() << "\n";
-      return kSuccess;
+int run_media_audio_to_mp3(const std::filesystem::path &acb,
+                           const std::filesystem::path &awb,
+                           const std::string &output) {
+  try {
+    const auto target = resolve_binary_output_path(output, "track.mp3");
+    if (!maiconv::convert_acb_awb_to_mp3(acb, awb, target)) {
+      throw std::runtime_error("Audio conversion failed: " + acb.string() +
+                               " + " + awb.string() + " -> " + target.string());
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
-    }
+    std::cout << "Successfully converted at: " << target.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_audio_file_to_mp3(const std::filesystem::path& input_audio,
-    const std::string& output) {
-    try {
-      const auto target = resolve_binary_output_path(output, "track.mp3");
-      if (!maiconv::convert_audio_to_mp3(input_audio, target)) {
-        throw std::runtime_error("Audio conversion failed: " + input_audio.string() + " -> " + target.string());
-      }
-      std::cout << "Successfully converted at: " << target.string() << "\n";
-      return kSuccess;
+int run_media_audio_file_to_mp3(const std::filesystem::path &input_audio,
+                                const std::string &output) {
+  try {
+    const auto target = resolve_binary_output_path(output, "track.mp3");
+    if (!maiconv::convert_audio_to_mp3(input_audio, target)) {
+      throw std::runtime_error("Audio conversion failed: " +
+                               input_audio.string() + " -> " + target.string());
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
-    }
+    std::cout << "Successfully converted at: " << target.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_mp3_to_acb_awb(const std::filesystem::path& input_mp3,
-    const std::string& output_acb,
-    const std::string& output_awb) {
-    try {
-      const auto target_acb = resolve_binary_output_path(output_acb, "track.acb");
-      std::filesystem::path target_awb;
-      if (output_awb.empty()) {
-        target_awb = target_acb;
-        target_awb.replace_extension(".awb");
-      }
-      else {
-        target_awb = resolve_binary_output_path(output_awb, "track.awb");
-      }
+int run_media_mp3_to_acb_awb(const std::filesystem::path &input_mp3,
+                             const std::string &output_acb,
+                             const std::string &output_awb) {
+  try {
+    const auto target_acb = resolve_binary_output_path(output_acb, "track.acb");
+    std::filesystem::path target_awb;
+    if (output_awb.empty()) {
+      target_awb = target_acb;
+      target_awb.replace_extension(".awb");
+    } else {
+      target_awb = resolve_binary_output_path(output_awb, "track.awb");
+    }
 
-      if (!maiconv::convert_mp3_to_acb_awb(input_mp3, target_acb, target_awb)) {
-        throw std::runtime_error("Audio conversion failed: " + input_mp3.string() + " -> " +
+    if (!maiconv::convert_mp3_to_acb_awb(input_mp3, target_acb, target_awb)) {
+      throw std::runtime_error(
+          "Audio conversion failed: " + input_mp3.string() + " -> " +
           target_acb.string() + " + " + target_awb.string());
-      }
+    }
 
-      std::cout << "Successfully converted at:\n"
-        << "  ACB: " << target_acb.string() << "\n"
-        << "  AWB: " << target_awb.string() << "\n";
-      return kSuccess;
-    }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
-    }
+    std::cout << "Successfully converted at:\n"
+              << "  ACB: " << target_acb.string() << "\n"
+              << "  AWB: " << target_awb.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_cover_to_png(const std::filesystem::path& input_ab, const std::string& output) {
-    try {
-      const auto target = resolve_binary_output_path(output, "bg.png");
-      if (!maiconv::convert_ab_to_png(input_ab, target)) {
-        throw std::runtime_error("Cover conversion failed: " + input_ab.string() + " -> " + target.string());
-      }
-      std::cout << "Successfully converted at: " << target.string() << "\n";
-      return kSuccess;
+int run_media_cover_to_png(const std::filesystem::path &input_ab,
+                           const std::string &output) {
+  try {
+    const auto target = resolve_binary_output_path(output, "bg.png");
+    if (!maiconv::convert_ab_to_png(input_ab, target)) {
+      throw std::runtime_error("Cover conversion failed: " + input_ab.string() +
+                               " -> " + target.string());
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
-    }
+    std::cout << "Successfully converted at: " << target.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_cover_to_ab(const std::filesystem::path& input_image, const std::string& output) {
-    try {
-      const auto target = resolve_binary_output_path(output, "bg.ab");
-      if (!target.parent_path().empty()) {
-        std::filesystem::create_directories(target.parent_path());
-      }
-      std::filesystem::copy_file(input_image, target, std::filesystem::copy_options::overwrite_existing);
-      if (!std::filesystem::exists(target) || std::filesystem::file_size(target) == 0) {
-        throw std::runtime_error("Cover conversion failed: " + input_image.string() + " -> " + target.string());
-      }
-      std::cout << "Successfully converted at: " << target.string() << "\n";
-      return kSuccess;
+int run_media_cover_to_ab(const std::filesystem::path &input_image,
+                          const std::string &output) {
+  try {
+    const auto target = resolve_binary_output_path(output, "bg.ab");
+    if (!target.parent_path().empty()) {
+      std::filesystem::create_directories(target.parent_path());
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
+    std::filesystem::copy_file(
+        input_image, target, std::filesystem::copy_options::overwrite_existing);
+    if (!std::filesystem::exists(target) ||
+        std::filesystem::file_size(target) == 0) {
+      throw std::runtime_error("Cover conversion failed: " +
+                               input_image.string() + " -> " + target.string());
     }
+    std::cout << "Successfully converted at: " << target.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_video_to_mp4(const std::filesystem::path& input_video, const std::string& output) {
-    try {
-      const auto target = resolve_binary_output_path(output, "pv.mp4");
-      if (!maiconv::convert_dat_or_usm_to_mp4(input_video, target)) {
-        throw std::runtime_error("Video conversion failed: " + input_video.string() + " -> " + target.string());
-      }
-      std::cout << "Successfully converted at: " << target.string() << "\n";
-      return kSuccess;
+int run_media_video_to_mp4(const std::filesystem::path &input_video,
+                           const std::string &output) {
+  try {
+    const auto target = resolve_binary_output_path(output, "pv.mp4");
+    if (!maiconv::convert_dat_or_usm_to_mp4(input_video, target)) {
+      throw std::runtime_error("Video conversion failed: " +
+                               input_video.string() + " -> " + target.string());
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
-    }
+    std::cout << "Successfully converted at: " << target.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_video_to_dat_with_template(const std::filesystem::path& input_mp4,
-    const std::filesystem::path& template_dat,
-    const std::string& output) {
-    try {
-      const auto target = resolve_binary_output_path(output, "pv.dat");
-      if (!maiconv::convert_mp4_to_dat_with_template(input_mp4, template_dat, target)) {
-        throw std::runtime_error("Video conversion failed: " + input_mp4.string() +
-          " -> " + target.string() + " (template: " + template_dat.string() + ")");
-      }
-      std::cout << "Successfully converted at: " << target.string() << "\n";
-      return kSuccess;
+int run_media_video_to_dat_with_template(
+    const std::filesystem::path &input_mp4,
+    const std::filesystem::path &template_dat, const std::string &output) {
+  try {
+    const auto target = resolve_binary_output_path(output, "pv.dat");
+    if (!maiconv::convert_mp4_to_dat_with_template(input_mp4, template_dat,
+                                                   target)) {
+      throw std::runtime_error(
+          "Video conversion failed: " + input_mp4.string() + " -> " +
+          target.string() + " (template: " + template_dat.string() + ")");
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
-    }
+    std::cout << "Successfully converted at: " << target.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  int run_media_video_to_dat(const std::filesystem::path& input_mp4, const std::string& output) {
-    try {
-      const auto target = resolve_binary_output_path(output, "pv.dat");
-      if (!maiconv::convert_mp4_to_dat(input_mp4, target)) {
-        throw std::runtime_error(
-          "Video conversion failed: " + input_mp4.string() + " -> " + target.string() +
-          " (requires ffmpeg with VP9 encoder in PATH)");
-      }
-      std::cout << "Successfully converted at: " << target.string() << "\n";
-      return kSuccess;
+int run_media_video_to_dat(const std::filesystem::path &input_mp4,
+                           const std::string &output) {
+  try {
+    const auto target = resolve_binary_output_path(output, "pv.dat");
+    if (!maiconv::convert_mp4_to_dat(input_mp4, target)) {
+      throw std::runtime_error("Video conversion failed: " +
+                               input_mp4.string() + " -> " + target.string() +
+                               " (requires either in-process libav support or "
+                               "ffmpeg with VP9 encoder in PATH)");
     }
-    catch (const std::exception& ex) {
-      std::cerr << "Program cannot proceed because of following error returned:\n" << ex.what() << "\n";
-      return kFailure;
-    }
+    std::cout << "Successfully converted at: " << target.string() << "\n";
+    return kSuccess;
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
   }
+}
 
-  std::optional<maiconv::AssetsExportLayout> parse_assets_export_layout(const std::string& value) {
-    const std::string normalized = maiconv::lower(value);
-    if (normalized == "flat") {
-      return maiconv::AssetsExportLayout::Flat;
-    }
-    if (normalized == "genre") {
-      return maiconv::AssetsExportLayout::Genre;
-    }
-    if (normalized == "version") {
-      return maiconv::AssetsExportLayout::Version;
-    }
-    return std::nullopt;
+std::optional<maiconv::AssetsExportLayout>
+parse_assets_export_layout(const std::string &value) {
+  const std::string normalized = maiconv::lower(value);
+  if (normalized == "flat") {
+    return maiconv::AssetsExportLayout::Flat;
   }
-
-  std::optional<maiconv::AssetsLogLevel> parse_assets_log_level(const std::string& value) {
-    const std::string normalized = maiconv::lower(value);
-    if (normalized == "quiet") {
-      return maiconv::AssetsLogLevel::Quiet;
-    }
-    if (normalized == "normal") {
-      return maiconv::AssetsLogLevel::Normal;
-    }
-    if (normalized == "verbose") {
-      return maiconv::AssetsLogLevel::Verbose;
-    }
-    return std::nullopt;
+  if (normalized == "genre") {
+    return maiconv::AssetsExportLayout::Genre;
   }
+  if (normalized == "version") {
+    return maiconv::AssetsExportLayout::Version;
+  }
+  return std::nullopt;
+}
 
-}  // namespace
+std::optional<maiconv::AssetsLogLevel>
+parse_assets_log_level(const std::string &value) {
+  const std::string normalized = maiconv::lower(value);
+  if (normalized == "quiet") {
+    return maiconv::AssetsLogLevel::Quiet;
+  }
+  if (normalized == "normal") {
+    return maiconv::AssetsLogLevel::Normal;
+  }
+  if (normalized == "verbose") {
+    return maiconv::AssetsLogLevel::Verbose;
+  }
+  return std::nullopt;
+}
 
-int main(int argc, char** argv) {
-  CLI::App app{ "maiconv - Simai/ma2 cross-platform converter" };
+} // namespace
+
+int main(int argc, char **argv) {
+  CLI::App app{"maiconv - Simai/ma2 cross-platform converter"};
 
   int exit_code = kSuccess;
 
@@ -322,27 +338,32 @@ int main(int argc, char** argv) {
   std::string ma2_rotate_str;
   int ma2_shift = 0;
   std::string ma2_output;
-  auto* ma2_cmd = app.add_subcommand("ma2", "Convert MA2 chart to target format");
+  auto *ma2_cmd =
+      app.add_subcommand("ma2", "Convert MA2 chart to target format");
   ma2_cmd->add_option("--input", ma2_input, "Input ma2 file path")->required();
-  ma2_cmd->add_option("--format", ma2_format_str, "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
+  ma2_cmd->add_option("--format", ma2_format_str,
+                      "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
   ma2_cmd->add_option("--rotate", ma2_rotate_str,
-    "UpSideDown|Clockwise90|Clockwise180|Counterclockwise90|Counterclockwise180|LeftToRight");
+                      "UpSideDown|Clockwise90|Clockwise180|Counterclockwise90|"
+                      "Counterclockwise180|LeftToRight");
   ma2_cmd->add_option("--shift", ma2_shift, "Shift by ticks");
   ma2_cmd->add_option("--output", ma2_output, "Output path (file or folder)");
   ma2_cmd->callback([&]() {
     const auto fmt = maiconv::parse_chart_format(ma2_format_str);
     if (!fmt.has_value()) {
-      throw CLI::ValidationError("--format", "unsupported format: " + ma2_format_str);
+      throw CLI::ValidationError("--format",
+                                 "unsupported format: " + ma2_format_str);
     }
     std::optional<maiconv::FlipMethod> rotate;
     if (!ma2_rotate_str.empty()) {
       rotate = maiconv::parse_flip_method(ma2_rotate_str);
       if (!rotate.has_value()) {
-        throw CLI::ValidationError("--rotate", "unsupported rotate method: " + ma2_rotate_str);
+        throw CLI::ValidationError("--rotate", "unsupported rotate method: " +
+                                                   ma2_rotate_str);
       }
     }
     exit_code = run_ma2_to(ma2_input, *fmt, rotate, ma2_shift, ma2_output);
-    });
+  });
 
   std::string simai_input;
   std::string simai_format_str = "ma2-103";
@@ -350,25 +371,33 @@ int main(int argc, char** argv) {
   int simai_shift = 0;
   std::string simai_output;
   int simai_difficulty = 1;
-  auto* simai_cmd = app.add_subcommand("simai", "Convert Simai chart to target format");
-  simai_cmd->add_option("--input", simai_input, "Input simai file path")->required();
-  auto* simai_diff_opt =
-    simai_cmd->add_option("--difficulty", simai_difficulty, "Difficulty 1..7")->check(CLI::Range(1, 7));
-  simai_cmd->add_option("--format", simai_format_str, "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
+  auto *simai_cmd =
+      app.add_subcommand("simai", "Convert Simai chart to target format");
+  simai_cmd->add_option("--input", simai_input, "Input simai file path")
+      ->required();
+  auto *simai_diff_opt =
+      simai_cmd->add_option("--difficulty", simai_difficulty, "Difficulty 1..7")
+          ->check(CLI::Range(1, 7));
+  simai_cmd->add_option("--format", simai_format_str,
+                        "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
   simai_cmd->add_option("--rotate", simai_rotate_str,
-    "UpSideDown|Clockwise90|Clockwise180|Counterclockwise90|Counterclockwise180|LeftToRight");
+                        "UpSideDown|Clockwise90|Clockwise180|"
+                        "Counterclockwise90|Counterclockwise180|LeftToRight");
   simai_cmd->add_option("--shift", simai_shift, "Shift by ticks");
-  simai_cmd->add_option("--output", simai_output, "Output path (file or folder)");
+  simai_cmd->add_option("--output", simai_output,
+                        "Output path (file or folder)");
   simai_cmd->callback([&]() {
     const auto fmt = maiconv::parse_chart_format(simai_format_str);
     if (!fmt.has_value()) {
-      throw CLI::ValidationError("--format", "unsupported format: " + simai_format_str);
+      throw CLI::ValidationError("--format",
+                                 "unsupported format: " + simai_format_str);
     }
     std::optional<maiconv::FlipMethod> rotate;
     if (!simai_rotate_str.empty()) {
       rotate = maiconv::parse_flip_method(simai_rotate_str);
       if (!rotate.has_value()) {
-        throw CLI::ValidationError("--rotate", "unsupported rotate method: " + simai_rotate_str);
+        throw CLI::ValidationError("--rotate", "unsupported rotate method: " +
+                                                   simai_rotate_str);
       }
     }
 
@@ -376,8 +405,9 @@ int main(int argc, char** argv) {
     if (simai_diff_opt->count() > 0) {
       diff = simai_difficulty;
     }
-    exit_code = run_simai_to(simai_input, diff, *fmt, rotate, simai_shift, simai_output);
-    });
+    exit_code = run_simai_to(simai_input, diff, *fmt, rotate, simai_shift,
+                             simai_output);
+  });
 
   std::string assets_input;
   std::string assets_output;
@@ -397,53 +427,80 @@ int main(int argc, char** argv) {
   bool assets_json = false;
   bool assets_zip = false;
   bool assets_collection = false;
+  int assets_jobs = 1;
+  bool assets_timing = false;
   std::string assets_log_level_str = "normal";
-  auto* assets_cmd =
-    app.add_subcommand("assets", "Export from StreamingAssets (all, one id, or one id+difficulty)");
-  assets_cmd->add_option("--input", assets_input, "Input path (StreamingAssets root)")->required();
-  assets_cmd->add_option("--output", assets_output, "Output directory")->required();
-  auto* assets_id_opt =
-    assets_cmd->add_option("--id", assets_id,
-      "Music id (optional, when omitted export all tracks)");
-  auto* assets_diff_opt =
-    assets_cmd->add_option("--difficulty", assets_difficulty,
-      "Difficulty 1..7 using exported maidata numbering (optional, with --id set and no --difficulty export all difficulties)")
-    ->check(CLI::Range(1, 7));
-  assets_cmd->add_option("--music", assets_music, "Override music folder (default: auto-detect)");
-  assets_cmd->add_option("--cover", assets_cover, "Override cover folder (default: auto-detect)");
-  assets_cmd->add_option("--video", assets_video, "Override video folder (default: auto-detect)");
-  assets_cmd->add_option("--format", assets_format_str, "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
+  auto *assets_cmd = app.add_subcommand(
+      "assets",
+      "Export from StreamingAssets (all, one id, or one id+difficulty)");
+  assets_cmd
+      ->add_option("--input", assets_input, "Input path (StreamingAssets root)")
+      ->required();
+  assets_cmd->add_option("--output", assets_output, "Output directory")
+      ->required();
+  auto *assets_id_opt = assets_cmd->add_option(
+      "--id", assets_id, "Music id (optional, when omitted export all tracks)");
+  auto *assets_diff_opt =
+      assets_cmd
+          ->add_option(
+              "--difficulty", assets_difficulty,
+              "Difficulty 1..7 using exported maidata numbering (optional, "
+              "with --id set and no --difficulty export all difficulties)")
+          ->check(CLI::Range(1, 7));
+  assets_cmd->add_option("--music", assets_music,
+                         "Override music folder (default: auto-detect)");
+  assets_cmd->add_option("--cover", assets_cover,
+                         "Override cover folder (default: auto-detect)");
+  assets_cmd->add_option("--video", assets_video,
+                         "Override video folder (default: auto-detect)");
+  assets_cmd->add_option("--format", assets_format_str,
+                         "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
   assets_cmd->add_option("--layout", assets_layout_str, "flat|genre|version");
-  assets_cmd->add_flag("--display", assets_display, "Export maidata lv_* using display levels instead of constants");
+  assets_cmd->add_flag(
+      "--display", assets_display,
+      "Export maidata lv_* using display levels instead of constants");
   assets_cmd->add_option("--rotate", assets_rotate_str,
-    "UpSideDown|Clockwise90|Clockwise180|Counterclockwise90|Counterclockwise180|LeftToRight");
+                         "UpSideDown|Clockwise90|Clockwise180|"
+                         "Counterclockwise90|Counterclockwise180|LeftToRight");
   assets_cmd->add_option("--shift", assets_shift, "Shift by ticks");
   assets_cmd->add_flag("--decimal", assets_decimal, "Use decimal levels");
   assets_cmd->add_flag("--ignore", assets_ignore, "Ignore incomplete assets");
-  assets_cmd->add_flag("--number", assets_number, "Use music id as folder name");
+  assets_cmd->add_flag("--number", assets_number,
+                       "Use music id as folder name");
   assets_cmd->add_flag("--json", assets_json, "Write _index.json");
   assets_cmd->add_flag("--zip", assets_zip, "Zip output folders");
-  assets_cmd->add_flag("--collection", assets_collection, "Write collection manifests");
+  assets_cmd->add_flag("--collection", assets_collection,
+                       "Write collection manifests");
+  assets_cmd
+      ->add_option("--jobs", assets_jobs,
+                   "Worker count for track-level parallel export")
+      ->check(CLI::Range(1, 128));
+  assets_cmd->add_flag("--timing", assets_timing,
+                       "Emit phase timing summary (aggregate + p95)");
   assets_cmd->add_option("--verbosity,--log-level", assets_log_level_str,
-    "Console output level: quiet|normal|verbose");
+                         "Console output level: quiet|normal|verbose");
   assets_cmd->callback([&]() {
     const auto fmt = maiconv::parse_chart_format(assets_format_str);
     if (!fmt.has_value()) {
-      throw CLI::ValidationError("--format", "unsupported format: " + assets_format_str);
+      throw CLI::ValidationError("--format",
+                                 "unsupported format: " + assets_format_str);
     }
     const auto layout = parse_assets_export_layout(assets_layout_str);
     if (!layout.has_value()) {
-      throw CLI::ValidationError("--layout", "unsupported layout: " + assets_layout_str);
+      throw CLI::ValidationError("--layout",
+                                 "unsupported layout: " + assets_layout_str);
     }
     const auto log_level = parse_assets_log_level(assets_log_level_str);
     if (!log_level.has_value()) {
-      throw CLI::ValidationError("--verbosity", "unsupported log level: " + assets_log_level_str);
+      throw CLI::ValidationError("--verbosity", "unsupported log level: " +
+                                                    assets_log_level_str);
     }
     std::optional<maiconv::FlipMethod> rotate;
     if (!assets_rotate_str.empty()) {
       rotate = maiconv::parse_flip_method(assets_rotate_str);
       if (!rotate.has_value()) {
-        throw CLI::ValidationError("--rotate", "unsupported rotate method: " + assets_rotate_str);
+        throw CLI::ValidationError("--rotate", "unsupported rotate method: " +
+                                                   assets_rotate_str);
       }
     }
 
@@ -468,8 +525,9 @@ int main(int argc, char** argv) {
 
     options.format = *fmt;
     options.export_layout = *layout;
-    options.maidata_level_mode = assets_display ? maiconv::MaidataLevelMode::Display
-      : maiconv::MaidataLevelMode::Constant;
+    options.maidata_level_mode = assets_display
+                                     ? maiconv::MaidataLevelMode::Display
+                                     : maiconv::MaidataLevelMode::Constant;
     options.rotate = rotate;
     options.shift_ticks = assets_shift;
     options.strict_decimal = assets_decimal;
@@ -479,9 +537,11 @@ int main(int argc, char** argv) {
     options.export_zip = assets_zip;
     options.compile_collections = assets_collection;
     options.log_level = *log_level;
+    options.jobs = assets_jobs;
+    options.enable_timing = assets_timing;
 
     exit_code = maiconv::run_compile_assets(options);
-    });
+  });
 
   std::string media_audio_acb;
   std::string media_audio_awb;
@@ -494,106 +554,146 @@ int main(int argc, char** argv) {
   std::string media_video_output;
   std::string media_video_template;
 
-  auto* media_cmd = app.add_subcommand("media", "Standalone media transcode commands");
-  auto* media_audio_cmd = media_cmd->add_subcommand("audio", "Convert audio to MP3");
-  media_audio_cmd->add_option("--input", media_audio_input,
-    "Single input audio path (e.g. .mp3/.ogg/.wav/.awb/.acb when paired files are not required)");
-  media_audio_cmd->add_option("--acb", media_audio_acb, "Input .acb path (use with --awb)");
-  media_audio_cmd->add_option("--awb", media_audio_awb, "Input .awb path (use with --acb)");
+  auto *media_cmd =
+      app.add_subcommand("media", "Standalone media transcode commands");
+  auto *media_audio_cmd =
+      media_cmd->add_subcommand("audio", "Convert audio to MP3");
+  media_audio_cmd->add_option(
+      "--input", media_audio_input,
+      "Single input audio path (e.g. .mp3/.ogg/.wav/.awb/.acb when paired "
+      "files are not required)");
+  media_audio_cmd->add_option("--acb", media_audio_acb,
+                              "Input .acb path (use with --awb)");
+  media_audio_cmd->add_option("--awb", media_audio_awb,
+                              "Input .awb path (use with --acb)");
   media_audio_cmd->add_option("--output", media_audio_output,
-    "Output file or directory (default: ./track.mp3 for decode, ./track.acb for encode)");
+                              "Output file or directory (default: ./track.mp3 "
+                              "for decode, ./track.acb for encode)");
   media_audio_cmd->add_option("--output-awb", media_audio_output_awb,
-    "Output .awb file or directory (only for .mp3 input; default: same stem as --output)");
+                              "Output .awb file or directory (only for .mp3 "
+                              "input; default: same stem as --output)");
   media_audio_cmd->callback([&]() {
     const bool has_input = !media_audio_input.empty();
     const bool has_acb = !media_audio_acb.empty();
     const bool has_awb = !media_audio_awb.empty();
     if (!has_input && !(has_acb && has_awb)) {
-      throw CLI::ValidationError("--input", "provide either --input or both --acb and --awb");
+      throw CLI::ValidationError(
+          "--input", "provide either --input or both --acb and --awb");
     }
     if (has_input && (has_acb || has_awb)) {
-      throw CLI::ValidationError("--input", "--input cannot be used together with --acb/--awb");
+      throw CLI::ValidationError(
+          "--input", "--input cannot be used together with --acb/--awb");
     }
 
     if (has_input) {
-      const auto input_ext = maiconv::lower(std::filesystem::path(media_audio_input).extension().string());
+      const auto input_ext = maiconv::lower(
+          std::filesystem::path(media_audio_input).extension().string());
       if (input_ext == ".mp3") {
         if (!media_audio_output_awb.empty()) {
-          const auto awb_ext = maiconv::lower(std::filesystem::path(media_audio_output_awb).extension().string());
+          const auto awb_ext =
+              maiconv::lower(std::filesystem::path(media_audio_output_awb)
+                                 .extension()
+                                 .string());
           if (!awb_ext.empty() && awb_ext != ".awb") {
-            throw CLI::ValidationError("--output-awb", "expected .awb file or directory");
+            throw CLI::ValidationError("--output-awb",
+                                       "expected .awb file or directory");
           }
         }
         if (!media_audio_output.empty()) {
-          const auto out_ext = maiconv::lower(std::filesystem::path(media_audio_output).extension().string());
+          const auto out_ext = maiconv::lower(
+              std::filesystem::path(media_audio_output).extension().string());
           if (!out_ext.empty() && out_ext != ".acb") {
-            throw CLI::ValidationError("--output", "for .mp3 input expected .acb file or directory");
+            throw CLI::ValidationError(
+                "--output", "for .mp3 input expected .acb file or directory");
           }
         }
-        exit_code = run_media_mp3_to_acb_awb(media_audio_input, media_audio_output, media_audio_output_awb);
+        exit_code = run_media_mp3_to_acb_awb(
+            media_audio_input, media_audio_output, media_audio_output_awb);
         return;
       }
 
       if (!media_audio_output_awb.empty()) {
-        throw CLI::ValidationError("--output-awb", "--output-awb is only valid for .mp3 input");
+        throw CLI::ValidationError("--output-awb",
+                                   "--output-awb is only valid for .mp3 input");
       }
-      exit_code = run_media_audio_file_to_mp3(media_audio_input, media_audio_output);
+      exit_code =
+          run_media_audio_file_to_mp3(media_audio_input, media_audio_output);
       return;
     }
 
-    const auto acb_ext = maiconv::lower(std::filesystem::path(media_audio_acb).extension().string());
-    const auto awb_ext = maiconv::lower(std::filesystem::path(media_audio_awb).extension().string());
+    const auto acb_ext = maiconv::lower(
+        std::filesystem::path(media_audio_acb).extension().string());
+    const auto awb_ext = maiconv::lower(
+        std::filesystem::path(media_audio_awb).extension().string());
     if (acb_ext != ".acb") {
       throw CLI::ValidationError("--acb", "expected .acb file");
     }
     if (awb_ext != ".awb") {
       throw CLI::ValidationError("--awb", "expected .awb file");
     }
-    exit_code = run_media_audio_to_mp3(media_audio_acb, media_audio_awb, media_audio_output);
-    });
+    exit_code = run_media_audio_to_mp3(media_audio_acb, media_audio_awb,
+                                       media_audio_output);
+  });
 
-  auto* media_cover_cmd = media_cmd->add_subcommand("cover", "Convert jacket between .ab and .png/.jpg/.jpeg");
-  media_cover_cmd->add_option("--input", media_cover_input, "Input .ab path")->required();
+  auto *media_cover_cmd = media_cmd->add_subcommand(
+      "cover", "Convert jacket between .ab and .png/.jpg/.jpeg");
+  media_cover_cmd->add_option("--input", media_cover_input, "Input .ab path")
+      ->required();
   media_cover_cmd->add_option("--output", media_cover_output,
-    "Output file or directory (default: based on direction: ./bg.png or ./bg.ab)");
+                              "Output file or directory (default: based on "
+                              "direction: ./bg.png or ./bg.ab)");
   media_cover_cmd->callback([&]() {
-    const auto in_ext = maiconv::lower(std::filesystem::path(media_cover_input).extension().string());
+    const auto in_ext = maiconv::lower(
+        std::filesystem::path(media_cover_input).extension().string());
     std::string out_ext;
     if (!media_cover_output.empty()) {
-      out_ext = maiconv::lower(std::filesystem::path(media_cover_output).extension().string());
+      out_ext = maiconv::lower(
+          std::filesystem::path(media_cover_output).extension().string());
     }
 
     const bool input_is_ab = in_ext == ".ab";
-    const bool input_is_image = in_ext == ".png" || in_ext == ".jpg" || in_ext == ".jpeg";
+    const bool input_is_image =
+        in_ext == ".png" || in_ext == ".jpg" || in_ext == ".jpeg";
     if (!input_is_ab && !input_is_image) {
-      throw CLI::ValidationError("--input", "expected .ab/.png/.jpg/.jpeg file");
+      throw CLI::ValidationError("--input",
+                                 "expected .ab/.png/.jpg/.jpeg file");
     }
 
     if (input_is_ab) {
       if (!out_ext.empty() && out_ext != ".png") {
-        throw CLI::ValidationError("--output", "for .ab input, output must be .png or a directory");
+        throw CLI::ValidationError(
+            "--output", "for .ab input, output must be .png or a directory");
       }
       exit_code = run_media_cover_to_png(media_cover_input, media_cover_output);
       return;
     }
 
     if (!out_ext.empty() && out_ext != ".ab") {
-      throw CLI::ValidationError("--output", "for image input, output must be .ab or a directory");
+      throw CLI::ValidationError(
+          "--output", "for image input, output must be .ab or a directory");
     }
     exit_code = run_media_cover_to_ab(media_cover_input, media_cover_output);
-    });
+  });
 
-  auto* media_video_cmd = media_cmd->add_subcommand("video", "Convert .dat/.usm -> pv.mp4, or .mp4 -> pv.dat (optional --template)");
-  media_video_cmd->add_option("--input", media_video_input, "Input .dat/.usm/.mp4 path")->required();
+  auto *media_video_cmd = media_cmd->add_subcommand(
+      "video",
+      "Convert .dat/.usm -> pv.mp4, or .mp4 -> pv.dat (optional --template)");
+  media_video_cmd
+      ->add_option("--input", media_video_input, "Input .dat/.usm/.mp4 path")
+      ->required();
   media_video_cmd->add_option("--template", media_video_template,
-    "Optional template .dat/.usm for .mp4 input (when omitted, tries WannaCRI createusm path)");
+                              "Optional template .dat/.usm for .mp4 input "
+                              "(when omitted, tries WannaCRI createusm path)");
   media_video_cmd->add_option("--output", media_video_output,
-    "Output file or directory (default: based on direction: ./pv.mp4 or ./pv.dat)");
+                              "Output file or directory (default: based on "
+                              "direction: ./pv.mp4 or ./pv.dat)");
   media_video_cmd->callback([&]() {
-    const auto ext = maiconv::lower(std::filesystem::path(media_video_input).extension().string());
+    const auto ext = maiconv::lower(
+        std::filesystem::path(media_video_input).extension().string());
     if (ext == ".dat" || ext == ".usm") {
       if (!media_video_template.empty()) {
-        throw CLI::ValidationError("--template", "not needed for .dat/.usm input");
+        throw CLI::ValidationError("--template",
+                                   "not needed for .dat/.usm input");
       }
       exit_code = run_media_video_to_mp4(media_video_input, media_video_output);
       return;
@@ -601,11 +701,14 @@ int main(int argc, char** argv) {
 
     if (ext == ".mp4") {
       if (!media_video_template.empty()) {
-        const auto template_ext = maiconv::lower(std::filesystem::path(media_video_template).extension().string());
+        const auto template_ext = maiconv::lower(
+            std::filesystem::path(media_video_template).extension().string());
         if (template_ext != ".dat" && template_ext != ".usm") {
-          throw CLI::ValidationError("--template", "expected template .dat or .usm file");
+          throw CLI::ValidationError("--template",
+                                     "expected template .dat or .usm file");
         }
-        exit_code = run_media_video_to_dat_with_template(media_video_input, media_video_template, media_video_output);
+        exit_code = run_media_video_to_dat_with_template(
+            media_video_input, media_video_template, media_video_output);
         return;
       }
       exit_code = run_media_video_to_dat(media_video_input, media_video_output);
@@ -613,14 +716,13 @@ int main(int argc, char** argv) {
     }
 
     throw CLI::ValidationError("--input", "expected .dat/.usm/.mp4 file");
-    });
+  });
   media_cmd->require_subcommand(1);
 
   try {
     app.require_subcommand(1);
     CLI11_PARSE(app, argc, argv);
-  }
-  catch (const CLI::ParseError& e) {
+  } catch (const CLI::ParseError &e) {
     return app.exit(e);
   }
 

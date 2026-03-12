@@ -38,14 +38,32 @@ ctest --preset default
 
 ## FFmpeg Dependency Details
 
-Video-related `maiconv media` features require a system `ffmpeg` executable available in `PATH`.
+Video-related `maiconv media` features now support two backends:
+- In-process `libav` backend (preferred): enabled when `MAICONV_ENABLE_LIBAV_TRANSCODE=ON` and FFmpeg development libraries are detected at configure time.
+- External `ffmpeg` backend (fallback): used when in-process `libav` is unavailable.
+
+Default build behavior:
+- `MAICONV_ENABLE_LIBAV_TRANSCODE=ON` (auto-detect).
+- If detection fails, MaiConv falls back to external `ffmpeg` and still works.
+
+Build examples:
+
+```bash
+# default (auto-detect in-process libav)
+cmake --preset default
+
+# force fallback backend (no in-process libav)
+cmake --preset nolibav
+# or: cmake -S . -B build/nolibav -G Ninja -DMAICONV_ENABLE_LIBAV_TRANSCODE=OFF
+```
+
+External `ffmpeg` executable requirements (fallback backend):
+- `ffmpeg` should be available in `PATH`, or set `MAICONV_FFMPEG` to an absolute executable path.
+- `ffprobe` is optional (useful for manual diagnostics).
 
 Required capabilities by feature:
 - `dat/usm -> mp4`: requires `libx264` encoder (MaiConv transcodes VP9 IVF into H.264 MP4)
 - `mp4 -> dat` (both template and template-free paths): requires `libvpx-vp9` encoder (MaiConv first transcodes to VP9 IVF)
-
-Recommended:
-- `ffprobe` (useful for manual stream diagnostics; not a hard runtime requirement for MaiConv)
 
 Quick checks (Windows PowerShell):
 
@@ -189,12 +207,12 @@ When source media is in original game formats, `assets` converts them as follows
 - `acb + awb -> track.mp3` (built-in `libvgmstream` + `shine`)
 - `ab -> bg.png` (embedded PNG extraction)
 - `dat/usm -> pv.mp4`
-  - VP9-only path; VP9->H.264 transcode via `ffmpeg` in `PATH`
+  - VP9-only path; VP9->H.264 transcode via in-process `libav` when available, otherwise external `ffmpeg`
 - `mp4 + template(dat/usm) -> pv.dat`
-  - transcodes to VP9 IVF first, then writes back into template DAT/USM packet layout using inverse encryption
+  - transcodes to VP9 IVF first (in-process `libav` or external `ffmpeg` fallback), then writes back into template DAT/USM packet layout using inverse encryption
 - `mp4 -> pv.dat` (template-free)
-  - transcodes to VP9 IVF first, then uses MaiConv's built-in C++ packer to emit DAT (`@SFV` packets + compatible encryption)
-  - this mode only requires `ffmpeg` with `libvpx-vp9` encoder support
+  - transcodes to VP9 IVF first (in-process `libav` or external `ffmpeg` fallback), then uses MaiConv's built-in C++ packer to emit DAT (`@SFV` packets + compatible encryption)
+  - fallback mode requires external `ffmpeg` with `libvpx-vp9` encoder support
 
 If conversion fails, raw assets are **not** preserved. The song is marked as `_Incomplete` (or the command fails without `--ignore`), and failed source/target paths are written to `_log.txt`.
 

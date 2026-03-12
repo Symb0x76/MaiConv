@@ -29,6 +29,15 @@
       }
     },
     {
+      "name": "nolibav",
+      "displayName": "No LibAV",
+      "inherits": "default",
+      "binaryDir": "${sourceDir}/build/nolibav",
+      "cacheVariables": {
+        "MAICONV_ENABLE_LIBAV_TRANSCODE": "OFF"
+      }
+    },
+    {
       "name": "msvc",
       "displayName": "MSVC",
       "generator": "Ninja",
@@ -51,6 +60,10 @@
       "configurePreset": "asan"
     },
     {
+      "name": "nolibav",
+      "configurePreset": "nolibav"
+    },
+    {
       "name": "msvc",
       "configurePreset": "msvc"
     }
@@ -66,6 +79,13 @@
     {
       "name": "asan",
       "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "nolibav",
+      "configurePreset": "nolibav",
       "output": {
         "outputOnFailure": true
       }

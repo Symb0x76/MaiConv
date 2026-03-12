@@ -28,13 +28,14 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg nasm yasm
+        sudo apt-get install -y ffmpeg pkg-config nasm yasm \
+          libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
 
     - name: Install FFmpeg build prerequisites (macOS)
       if: runner.os == 'macOS'
       run: |
         brew update
-        brew install ffmpeg nasm yasm
+        brew install ffmpeg pkg-config nasm yasm
 
     - name: Clean build directory
       run: cmake -E rm -rf build/default
@@ -47,3 +48,15 @@ jobs:
 
     - name: Test
       run: ctest --preset default
+
+    - name: Configure (No LibAV fallback)
+      if: runner.os == 'Linux'
+      run: cmake --preset nolibav
+
+    - name: Build (No LibAV fallback)
+      if: runner.os == 'Linux'
+      run: cmake --build --preset nolibav --parallel
+
+    - name: Test (No LibAV fallback)
+      if: runner.os == 'Linux'
+      run: ctest --preset nolibav
