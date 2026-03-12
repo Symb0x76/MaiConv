@@ -36,6 +36,7 @@ extern "C" {
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+extern char **environ;
 #endif
 
 #if MAICONV_HAS_LIBAV
@@ -515,8 +516,6 @@ bool run_ffmpeg_feed_stdin(const std::vector<std::wstring> &args,
   return write_ok && run_ok;
 }
 #else
-extern char **environ;
-
 std::string resolve_ffmpeg_executable() {
   static std::once_flag once;
   static std::string cached;
@@ -554,9 +553,9 @@ std::string resolve_ffmpeg_executable() {
   pid_t pid = -1;
   const int spawn_rc = has_separator
                            ? posix_spawn(&pid, executable.c_str(), nullptr,
-                                         nullptr, argv.data(), environ)
+                                         nullptr, argv.data(), ::environ)
                            : posix_spawnp(&pid, executable.c_str(), nullptr,
-                                          nullptr, argv.data(), environ);
+                                          nullptr, argv.data(), ::environ);
   if (spawn_rc != 0) {
     return false;
   }
@@ -626,9 +625,9 @@ bool run_ffmpeg_capture_stdout(const std::vector<std::string> &args,
   pid_t pid = -1;
   const int spawn_rc = has_separator
                            ? posix_spawn(&pid, executable.c_str(), &actions,
-                                         nullptr, argv.data(), environ)
+                                         nullptr, argv.data(), ::environ)
                            : posix_spawnp(&pid, executable.c_str(), &actions,
-                                          nullptr, argv.data(), environ);
+                                          nullptr, argv.data(), ::environ);
   posix_spawn_file_actions_destroy(&actions);
   close(in_null);
   close(err_null);
@@ -721,9 +720,9 @@ bool run_ffmpeg_feed_stdin(const std::vector<std::string> &args,
   pid_t pid = -1;
   const int spawn_rc = has_separator
                            ? posix_spawn(&pid, executable.c_str(), &actions,
-                                         nullptr, argv.data(), environ)
+                                         nullptr, argv.data(), ::environ)
                            : posix_spawnp(&pid, executable.c_str(), &actions,
-                                          nullptr, argv.data(), environ);
+                                          nullptr, argv.data(), ::environ);
   posix_spawn_file_actions_destroy(&actions);
   close(in_pipe[0]);
   close(out_null);
