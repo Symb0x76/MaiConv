@@ -152,6 +152,37 @@ std::string level_id_to_display_level(int level_id) {
   return kDisplayLevels[static_cast<std::size_t>(level_id)];
 }
 
+std::optional<std::string_view>
+version_name_from_version_id(std::string_view version_id) {
+  static constexpr std::array<std::pair<std::string_view, std::string_view>, 24>
+      kVersionIdMappings = {{
+          {"1", "maimai"},    {"2", "maimai PLUS"},
+          {"3", "GreeN"},     {"4", "GreeN PLUS"},
+          {"5", "ORANGE"},    {"6", "ORANGE PLUS"},
+          {"7", "PiNK"},      {"8", "PiNK PLUS"},
+          {"9", "MURASAKi"},  {"10", "MURASAKi PLUS"},
+          {"11", "MiLK"},     {"12", "MiLK PLUS"},
+          {"13", "maimaDX"},  {"14", "maimaDX PLUS"},
+          {"15", "Splash"},   {"16", "Splash PLUS"},
+          {"17", "UNiVERSE"}, {"18", "UNiVERSE PLUS"},
+          {"19", "FESTiVAL"}, {"20", "FESTiVAL PLUS"},
+          {"21", "BUDDiES"},  {"22", "BUDDiES PLUS"},
+          {"23", "PRiSM"},    {"24", "PRiSM PLUS"},
+      }};
+  for (const auto &[id, name] : kVersionIdMappings) {
+    if (version_id == id) {
+      return name;
+    }
+  }
+  return std::nullopt;
+}
+
+bool is_decimal_number(std::string_view value) {
+  return !value.empty() &&
+         std::all_of(value.begin(), value.end(),
+                     [](unsigned char c) { return std::isdigit(c) != 0; });
+}
+
 int constant_to_level_id(int level_x10) {
   if (level_x10 >= 156) {
     return 24;
@@ -301,6 +332,16 @@ TrackInfo parse_track_info(const std::filesystem::path &music_xml,
       info.version_id = parsed;
     }
   }
+
+  if (const auto mapped_version = version_name_from_version_id(info.version_id);
+      mapped_version.has_value()) {
+    const bool unknown_or_empty =
+        info.version.empty() || info.version == "Unknown";
+    if (unknown_or_empty || is_decimal_number(info.version)) {
+      info.version = std::string(*mapped_version);
+    }
+  }
+
   if (auto *composer = find_first_element_by_name(root, "artistName")) {
     info.composer = element_text(composer);
   } else if (auto *composer = find_first_element_by_name(root, "artist")) {
@@ -1270,18 +1311,43 @@ process_track_folder(const std::filesystem::path &folder,
     }
 
     const std::string display_name = export_display_title(info);
-    const std::string folder_stem =
-        options.music_id_folder_name
-            ? info.id
-            : (info.id + "_" + sanitize_folder_name(display_name));
-    std::filesystem::path track_output =
-        append_utf8_path(category_folder, folder_stem);
+    const auto id_only_track_output = [&]() {
+      return append_utf8_path(category_folder, info.id);
+    };
+    std::filesystem::path track_output;
+    bool used_id_folder_fallback = false;
+    if (options.music_id_folder_name) {
+      track_output = id_only_track_output();
+    } else {
+      const std::string folder_stem =
+          info.id + "_" + sanitize_folder_name(display_name);
+      try {
+        track_output = append_utf8_path(category_folder, folder_stem);
+      } catch (const std::exception &) {
+        track_output = id_only_track_output();
+        used_id_folder_fallback = true;
+      }
+    }
 
     const auto output_path_mutex = output_path_mutex_pool.acquire(track_output);
     std::lock_guard<std::mutex> output_guard(*output_path_mutex);
 
     std::filesystem::create_directories(category_folder);
-    std::filesystem::create_directories(track_output);
+    try {
+      std::filesystem::create_directories(track_output);
+    } catch (const std::filesystem::filesystem_error &) {
+      if (options.music_id_folder_name) {
+        throw;
+      }
+      track_output = id_only_track_output();
+      std::filesystem::create_directories(track_output);
+      used_id_folder_fallback = true;
+    }
+    if (used_id_folder_fallback) {
+      push_warning(result.warnings,
+                   "Folder name fallback to id for track " + info.id +
+                       ": unsupported characters in export title");
+    }
     std::filesystem::path final_track_output = track_output;
 
     Ma2Tokenizer tokenizer;
@@ -1788,6 +1854,7 @@ int run_compile_assets(const AssetsOptions &options) {
       last_warning_flush = now;
     };
 
+    std::optional<std::string> first_fatal_error;
     for (const auto &result : results) {
       timing.merge(result.timing);
       matched_music_id = matched_music_id || result.matched_music_id;
@@ -1801,8 +1868,10 @@ int run_compile_assets(const AssetsOptions &options) {
       }
 
       if (result.fatal_error.has_value()) {
-        flush_verbose_warnings(true);
-        throw std::runtime_error(*result.fatal_error);
+        if (!first_fatal_error.has_value()) {
+          first_fatal_error = result.fatal_error;
+        }
+        continue;
       }
 
       if (result.compiled_track.has_value()) {
@@ -1826,6 +1895,10 @@ int run_compile_assets(const AssetsOptions &options) {
       }
     }
     flush_verbose_warnings(true);
+
+    if (first_fatal_error.has_value()) {
+      throw std::runtime_error(*first_fatal_error);
+    }
 
     if (target_music_id.has_value() && !matched_music_id) {
       throw std::runtime_error("Music id not found: " + *target_music_id);

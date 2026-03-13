@@ -340,6 +340,42 @@ TEST_CASE("assets supports genre/version layout") {
   fs::remove_all(temp_root);
 }
 
+TEST_CASE("assets version layout maps numeric version to AddVersion id name") {
+  const fs::path temp_root = unique_temp_dir("assets_version_id_map");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path out_version = temp_root / "out_version";
+  const fs::path track_folder = assets_root / "L100" / "music" / "music000777";
+
+  fs::create_directories(track_folder);
+  write_text_file(track_folder / "000777_00.ma2", sample_ma2());
+
+  const std::string xml =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<MusicData>\n"
+      "  <name><id>777</id><str>VersionFallbackSong</str></name>\n"
+      "  <sortName><str>VersionFallbackSong</str></sortName>\n"
+      "  <genreName><id>101</id><str>POPSアニメ</str></genreName>\n"
+      "  <version>20000</version>\n"
+      "  <AddVersion><id>21</id><str></str></AddVersion>\n"
+      "  <artistName><id>1</id><str>Mock Artist</str></artistName>\n"
+      "  <bpm>120</bpm>\n"
+      "</MusicData>\n";
+  write_text_file(track_folder / "Music.xml", xml);
+
+  AssetsOptions by_version;
+  by_version.streaming_assets_path = assets_root;
+  by_version.output_path = out_version;
+  by_version.format = ChartFormat::Ma2_104;
+  by_version.export_layout = AssetsExportLayout::Version;
+  by_version.music_id_folder_name = true;
+
+  REQUIRE(run_compile_assets(by_version) == 0);
+  REQUIRE(fs::exists(out_version / "BUDDiES" / "000777" / "result.ma2"));
+  REQUIRE_FALSE(fs::exists(out_version / "20000"));
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets auto-detects media folders from streaming assets roots") {
   const fs::path temp_root = unique_temp_dir("assets_media_detect");
   const fs::path assets_root = temp_root / "StreamingAssets";
