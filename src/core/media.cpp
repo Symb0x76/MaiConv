@@ -236,7 +236,7 @@ std::filesystem::path make_temp_work_dir() {
   return temp_workspace_pool().make_workspace();
 }
 
-std::string path_to_utf8(const std::filesystem::path &path) {
+[[maybe_unused]] std::string path_to_utf8(const std::filesystem::path &path) {
 #if defined(_WIN32)
 #if defined(__cpp_char8_t)
   const std::u8string value = path.u8string();

@@ -329,6 +329,9 @@ parse_assets_log_level(const std::string &value) {
 } // namespace
 
 int main(int argc, char **argv) {
+  std::cout.setf(std::ios::unitbuf);
+  std::cerr.setf(std::ios::unitbuf);
+
   CLI::App app{"maiconv - Simai/ma2 cross-platform converter"};
 
   int exit_code = kSuccess;
