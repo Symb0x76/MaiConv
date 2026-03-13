@@ -962,6 +962,7 @@ void emit_track_output(const TrackInfo &info,
     std::cout << " -> " << path_to_utf8(output_path);
   }
   std::cout << "\n";
+  std::cout.flush();
 }
 
 void emit_log_output(const std::map<int, std::string> &compiled,
@@ -1618,6 +1619,12 @@ process_track_folder(const std::filesystem::path &folder,
     result.timing.media.add(std::chrono::steady_clock::now() - media_begin);
 
     if (incomplete && !options.ignore_incomplete_assets) {
+      // Keep per-track progress visible even when the run eventually fails due
+      // to incomplete assets.
+      result.info = info;
+      result.final_track_output = final_track_output;
+      result.incomplete = true;
+      result.emit_track_output = true;
       result.fatal_error = "Incomplete assets found. Use --ignore to continue.";
       return result;
     }
@@ -1797,6 +1804,17 @@ int run_compile_assets(const AssetsOptions &options) {
         std::min(folders.size(), static_cast<std::size_t>(options.jobs));
     std::vector<TrackProcessResult> results(folders.size());
     OutputPathMutexPool output_path_mutex_pool;
+    std::mutex progress_output_mutex;
+    const auto emit_track_progress_immediately =
+        [&](const TrackProcessResult &result) {
+          if (!result.emit_track_output) {
+            return;
+          }
+          std::lock_guard<std::mutex> progress_output_guard(
+              progress_output_mutex);
+          emit_track_output(result.info, result.final_track_output,
+                            result.incomplete, options.log_level);
+        };
 
     if (worker_count <= 1) {
       for (std::size_t i = 0; i < folders.size(); ++i) {
@@ -1804,6 +1822,7 @@ int run_compile_assets(const AssetsOptions &options) {
             folders[i], options, target_music_id, target_difficulty,
             music_bases, cover_bases, video_bases, music_indexes, cover_indexes,
             video_indexes, output_path_mutex_pool);
+        emit_track_progress_immediately(results[i]);
       }
     } else {
       std::atomic<std::size_t> next_index{0};
@@ -1821,6 +1840,7 @@ int run_compile_assets(const AssetsOptions &options) {
                 folders[index], options, target_music_id, target_difficulty,
                 music_bases, cover_bases, video_bases, music_indexes,
                 cover_indexes, video_indexes, output_path_mutex_pool);
+            emit_track_progress_immediately(results[index]);
           }
         });
       }
@@ -1890,8 +1910,6 @@ int run_compile_assets(const AssetsOptions &options) {
       if (result.emit_track_output) {
         ++tracks_since_warning_flush;
         flush_verbose_warnings(false);
-        emit_track_output(result.info, result.final_track_output,
-                          result.incomplete, options.log_level);
       }
     }
     flush_verbose_warnings(true);

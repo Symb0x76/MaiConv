@@ -655,6 +655,41 @@ TEST_CASE("assets supports acb/awb/ab/dat media naming") {
   fs::remove_all(temp_root);
 }
 
+TEST_CASE("assets logs incomplete progress before failing without --ignore") {
+  const fs::path temp_root =
+      unique_temp_dir("assets_compact_media_fail_progress");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A046", "012341", "RawMediaSongFail", "GAME",
+               "PRISM");
+  create_compact_media_assets(assets_root / "A046", "012341");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int result = run_compile_assets(options);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  REQUIRE(result == 2);
+  const std::string out = captured_out.str();
+  REQUIRE(out.find("Incomplete: 012341 RawMediaSongFail [DX]") !=
+          std::string::npos);
+  REQUIRE(out.find("Total music compiled:") == std::string::npos);
+  REQUIRE(captured_err.str().find("Incomplete assets found. Use --ignore to "
+                                  "continue.") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets verbose log level prints paths and immediate warnings") {
   const fs::path temp_root = unique_temp_dir("assets_progress_verbose");
   const fs::path assets_root = temp_root / "StreamingAssets";
