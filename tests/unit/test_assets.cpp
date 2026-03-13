@@ -605,6 +605,47 @@ TEST_CASE("assets index cache is reused on repeated runs") {
   fs::remove_all(temp_root);
 }
 
+TEST_CASE("assets resume skips already completed export folders") {
+  const fs::path temp_root = unique_temp_dir("assets_resume_skip_complete");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A032", "000557", "ResumeSong", "POPS", "PRISM");
+  create_media_assets(assets_root / "A032", "000557");
+
+  AssetsOptions first;
+  first.streaming_assets_path = assets_root;
+  first.output_path = output_root;
+  first.format = ChartFormat::Simai;
+  REQUIRE(run_compile_assets(first) == 0);
+
+  const fs::path maidata_path =
+      output_root / "000557_ResumeSong" / "maidata.txt";
+  REQUIRE(fs::exists(maidata_path));
+  write_text_file(maidata_path, "SENTINEL\n");
+
+  AssetsOptions second = first;
+  second.skip_existing_exports = true;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int second_result = run_compile_assets(second);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  REQUIRE(second_result == 0);
+  REQUIRE(read_text_file(maidata_path) == "SENTINEL\n");
+  const std::string out = captured_out.str();
+  REQUIRE(out.find("Skipped: 000557 ResumeSong") != std::string::npos);
+  REQUIRE(out.find("Total music compiled: 0") != std::string::npos);
+  REQUIRE(captured_err.str().empty());
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets supports acb/awb/ab/dat media naming") {
   const fs::path temp_root = unique_temp_dir("assets_compact_media");
   const fs::path assets_root = temp_root / "StreamingAssets";

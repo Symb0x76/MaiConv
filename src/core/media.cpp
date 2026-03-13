@@ -236,6 +236,24 @@ std::filesystem::path make_temp_work_dir() {
   return temp_workspace_pool().make_workspace();
 }
 
+std::string path_to_utf8(const std::filesystem::path &path) {
+#if defined(_WIN32)
+#if defined(__cpp_char8_t)
+  const std::u8string value = path.u8string();
+  std::string out;
+  out.reserve(value.size());
+  for (const char8_t ch : value) {
+    out.push_back(static_cast<char>(ch));
+  }
+  return out;
+#else
+  return path.u8string();
+#endif
+#else
+  return path.string();
+#endif
+}
+
 #if defined(_WIN32)
 std::wstring resolve_ffmpeg_executable();
 
@@ -1701,6 +1719,7 @@ bool transcode_video_stream(AVFormatContext *input_ctx, int video_stream_index,
 bool transcode_mp4_to_vp9_ivf_libav(const std::filesystem::path &source_mp4,
                                     std::vector<uint8_t> &target_ivf) {
   target_ivf.clear();
+  const std::string source_mp4_utf8 = path_to_utf8(source_mp4);
   AVFormatContext *input_ctx = nullptr;
   AVFormatContext *output_ctx = nullptr;
   AVCodecContext *decoder_ctx = nullptr;
@@ -1712,7 +1731,7 @@ bool transcode_mp4_to_vp9_ivf_libav(const std::filesystem::path &source_mp4,
   uint8_t *dyn_buffer = nullptr;
   bool success = false;
 
-  if (avformat_open_input(&input_ctx, source_mp4.string().c_str(), nullptr,
+  if (avformat_open_input(&input_ctx, source_mp4_utf8.c_str(), nullptr,
                           nullptr) < 0 ||
       avformat_find_stream_info(input_ctx, nullptr) < 0) {
     goto cleanup;
@@ -1807,6 +1826,7 @@ bool transcode_vp9_ivf_to_h264_mp4_libav(
   if (source_ivf.empty()) {
     return false;
   }
+  const std::string target_mp4_utf8 = path_to_utf8(target_mp4);
 
   AVFormatContext *input_ctx = avformat_alloc_context();
   AVFormatContext *output_ctx = nullptr;
@@ -1861,7 +1881,7 @@ bool transcode_vp9_ivf_to_h264_mp4_libav(
     std::filesystem::create_directories(target_mp4.parent_path());
   }
   if (avformat_alloc_output_context2(&output_ctx, nullptr, nullptr,
-                                     target_mp4.string().c_str()) < 0 ||
+                                     target_mp4_utf8.c_str()) < 0 ||
       output_ctx == nullptr) {
     goto cleanup;
   }
@@ -1882,8 +1902,8 @@ bool transcode_vp9_ivf_to_h264_mp4_libav(
   }
 
   if (!(output_ctx->oformat->flags & AVFMT_NOFILE)) {
-    if (avio_open(&output_ctx->pb, target_mp4.string().c_str(),
-                  AVIO_FLAG_WRITE) < 0) {
+    if (avio_open(&output_ctx->pb, target_mp4_utf8.c_str(), AVIO_FLAG_WRITE) <
+        0) {
       goto cleanup;
     }
   }
@@ -1953,7 +1973,7 @@ bool fallback_ffmpeg_vp9_to_h264(const std::vector<uint8_t> &vp9_ivf,
 #else
   const bool ok = run_ffmpeg_feed_stdin(
       {"-y", "-loglevel", "error", "-f", "ivf", "-i", "pipe:0", "-an", "-c:v",
-       "libx264", "-pix_fmt", "yuv420p", target_mp4.string()},
+       "libx264", "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)},
       vp9_ivf);
 #endif
 
@@ -1982,8 +2002,8 @@ bool transcode_mp4_to_vp9_ivf_bytes(const std::filesystem::path &source_mp4,
       target_ivf);
 #else
   const bool ok = run_ffmpeg_capture_stdout(
-      {"-y", "-loglevel", "error", "-i", source_mp4.string(), "-an", "-c:v",
-       "libvpx-vp9", "-f", "ivf", "pipe:1"},
+      {"-y", "-loglevel", "error", "-i", path_to_utf8(source_mp4), "-an",
+       "-c:v", "libvpx-vp9", "-f", "ivf", "pipe:1"},
       target_ivf);
 #endif
   return ok && is_vp9_ivf_stream(target_ivf);
@@ -2404,7 +2424,20 @@ bool convert_dat_or_usm_to_mp4(const std::filesystem::path &source,
     return false;
   }
 
-  return convert_usm_to_mp4(source, target_mp4);
+  if (convert_usm_to_mp4(source, target_mp4)) {
+    return true;
+  }
+
+#if defined(_WIN32)
+  const bool fallback_ok = run_ffmpeg_process(
+      {L"-y", L"-loglevel", L"error", L"-i", source.wstring(), L"-an", L"-c:v",
+       L"libx264", L"-pix_fmt", L"yuv420p", target_mp4.wstring()});
+#else
+  const bool fallback_ok = run_ffmpeg_process(
+      {"-y", "-loglevel", "error", "-i", path_to_utf8(source), "-an", "-c:v",
+       "libx264", "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
+#endif
+  return fallback_ok && file_non_empty(target_mp4);
 }
 
 bool convert_mp4_to_dat(const std::filesystem::path &source_mp4,

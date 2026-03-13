@@ -121,11 +121,18 @@ Export `maidata.txt` with display levels:
 maiconv assets --input /path/to/StreamingAssets --output ./Output --format maidata --display
 ```
 
+Resume export and skip already completed tracks:
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./Output --layout flat --resume
+```
+
 Rules:
 - when `--id` is omitted: export all tracks
 - when `--id` is provided and `--difficulty` is omitted: export all difficulties for that id
 - when both are provided: export only the selected difficulty
 - `--difficulty` uses exported `maidata` numbering: standard charts are usually `2..6`, utage is `7`
+- `--resume` (`--skip-existing`) skips tracks that already have complete exports, while keeping `_Incomplete` tracks eligible for retry
 
 `assets` auto-detects media folders from `StreamingAssets` and its first-level subdirectories:
 - audio: `SoundData`

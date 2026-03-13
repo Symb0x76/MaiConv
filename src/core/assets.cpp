@@ -280,7 +280,14 @@ TrackInfo parse_track_info(const std::filesystem::path &music_xml,
   TrackInfo info = default_track_info(fallback_id);
 
   tinyxml2::XMLDocument doc;
-  if (doc.LoadFile(music_xml.string().c_str()) != tinyxml2::XML_SUCCESS) {
+  std::string xml_payload;
+  try {
+    xml_payload = read_text_file(music_xml);
+  } catch (...) {
+    return info;
+  }
+  if (doc.Parse(xml_payload.c_str(), xml_payload.size()) !=
+      tinyxml2::XML_SUCCESS) {
     return info;
   }
 
@@ -949,15 +956,51 @@ void push_warning(std::vector<std::string> &warnings, std::string warning) {
   warnings.push_back(std::move(warning));
 }
 
+std::filesystem::path
+expected_track_chart_path(const std::filesystem::path &track_output,
+                          ChartFormat format) {
+  if (format == ChartFormat::Simai || format == ChartFormat::SimaiFes ||
+      format == ChartFormat::Maidata) {
+    return track_output / "maidata.txt";
+  }
+  return track_output / "result.ma2";
+}
+
+bool has_complete_track_output(const std::filesystem::path &track_output,
+                               const AssetsOptions &options) {
+  if (std::filesystem::exists(track_output) &&
+      std::filesystem::is_directory(track_output) &&
+      std::filesystem::exists(
+          expected_track_chart_path(track_output, options.format))) {
+    return true;
+  }
+
+  if (options.export_zip) {
+    auto zip_path = track_output;
+    zip_path += ".zip";
+    if (std::filesystem::exists(zip_path) &&
+        std::filesystem::is_regular_file(zip_path)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void emit_track_output(const TrackInfo &info,
                        const std::filesystem::path &output_path,
-                       bool incomplete, AssetsLogLevel log_level) {
+                       bool incomplete, bool skipped_existing,
+                       AssetsLogLevel log_level) {
   if (log_level == AssetsLogLevel::Quiet) {
     return;
   }
 
-  std::cout << (incomplete ? "Incomplete: " : "Completed: ") << info.id << " "
-            << export_display_title(info);
+  if (skipped_existing) {
+    std::cout << "Skipped: ";
+  } else {
+    std::cout << (incomplete ? "Incomplete: " : "Completed: ");
+  }
+  std::cout << info.id << " " << export_display_title(info);
   if (log_level == AssetsLogLevel::Verbose) {
     std::cout << " -> " << path_to_utf8(output_path);
   }
@@ -1204,6 +1247,7 @@ struct TrackProcessResult {
   bool matched_difficulty = false;
   bool emit_track_output = false;
   bool incomplete = false;
+  bool skipped_existing = false;
   TrackInfo info;
   std::filesystem::path final_track_output;
   std::optional<std::pair<int, std::string>> compiled_track;
@@ -1332,6 +1376,27 @@ process_track_folder(const std::filesystem::path &folder,
 
     const auto output_path_mutex = output_path_mutex_pool.acquire(track_output);
     std::lock_guard<std::mutex> output_guard(*output_path_mutex);
+
+    if (options.skip_existing_exports) {
+      std::optional<std::filesystem::path> existing_complete_output;
+      if (has_complete_track_output(track_output, options)) {
+        existing_complete_output = track_output;
+      } else if (!options.music_id_folder_name) {
+        const auto fallback_track_output = id_only_track_output();
+        if (fallback_track_output != track_output &&
+            has_complete_track_output(fallback_track_output, options)) {
+          existing_complete_output = fallback_track_output;
+        }
+      }
+
+      if (existing_complete_output.has_value()) {
+        result.info = std::move(info);
+        result.final_track_output = *existing_complete_output;
+        result.skipped_existing = true;
+        result.emit_track_output = true;
+        return result;
+      }
+    }
 
     std::filesystem::create_directories(category_folder);
     try {
@@ -1677,7 +1742,7 @@ int run_compile_assets(const AssetsOptions &options) {
     }
     if (!std::filesystem::exists(options.streaming_assets_path)) {
       throw std::runtime_error("Input folder not found: " +
-                               options.streaming_assets_path.string());
+                               path_to_utf8(options.streaming_assets_path));
     }
     if (options.jobs < 1) {
       throw std::runtime_error("jobs must be >= 1");
@@ -1797,7 +1862,7 @@ int run_compile_assets(const AssetsOptions &options) {
     std::sort(folders.begin(), folders.end());
     if (folders.empty()) {
       throw std::runtime_error("No music folders found under input path: " +
-                               options.streaming_assets_path.string());
+                               path_to_utf8(options.streaming_assets_path));
     }
 
     const std::size_t worker_count =
@@ -1813,7 +1878,8 @@ int run_compile_assets(const AssetsOptions &options) {
           std::lock_guard<std::mutex> progress_output_guard(
               progress_output_mutex);
           emit_track_output(result.info, result.final_track_output,
-                            result.incomplete, options.log_level);
+                            result.incomplete, result.skipped_existing,
+                            options.log_level);
         };
 
     if (worker_count <= 1) {

@@ -121,11 +121,18 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514 --
 maiconv assets --input /path/to/StreamingAssets --output ./output --format maidata --display
 ```
 
+补全导出并跳过已完成曲目：
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat --resume
+```
+
 规则：
 - 不传 `--id`：导出全部曲目
 - 传 `--id` 且不传 `--difficulty`：导出该 id 的全部难度
 - 同时传 `--id` 和 `--difficulty`：只导出该难度
 - `--difficulty` 使用导出的 `maidata` 难度编号：普通谱通常是 `2..6`，宴谱是 `7`
+- `--resume`（`--skip-existing`）会跳过已存在完整导出的曲目；`_Incomplete` 曲目仍会继续尝试补全
 
 `assets` 会自动从 `StreamingAssets` 及其一级子目录识别素材目录：
 - 音频：`SoundData`

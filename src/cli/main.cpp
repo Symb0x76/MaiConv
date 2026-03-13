@@ -423,6 +423,7 @@ int main(int argc, char **argv) {
   bool assets_display = false;
   bool assets_decimal = false;
   bool assets_ignore = false;
+  bool assets_resume = false;
   bool assets_number = false;
   bool assets_json = false;
   bool assets_zip = false;
@@ -465,6 +466,8 @@ int main(int argc, char **argv) {
   assets_cmd->add_option("--shift", assets_shift, "Shift by ticks");
   assets_cmd->add_flag("--decimal", assets_decimal, "Use decimal levels");
   assets_cmd->add_flag("--ignore", assets_ignore, "Ignore incomplete assets");
+  assets_cmd->add_flag("--resume,--skip-existing", assets_resume,
+                       "Skip tracks that already have a complete export");
   assets_cmd->add_flag("--number", assets_number,
                        "Use music id as folder name");
   assets_cmd->add_flag("--json", assets_json, "Write _index.json");
@@ -532,6 +535,7 @@ int main(int argc, char **argv) {
     options.shift_ticks = assets_shift;
     options.strict_decimal = assets_decimal;
     options.ignore_incomplete_assets = assets_ignore;
+    options.skip_existing_exports = assets_resume;
     options.music_id_folder_name = assets_number;
     options.log_tracks_json = assets_json;
     options.export_zip = assets_zip;
