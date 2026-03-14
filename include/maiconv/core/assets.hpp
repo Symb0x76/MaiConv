@@ -44,6 +44,7 @@ struct AssetsOptions {
 
   bool strict_decimal = false;
   bool ignore_incomplete_assets = false;
+  bool dummy_assets = false;
   bool skip_existing_exports = false;
   bool music_id_folder_name = false;
   bool log_tracks_json = false;

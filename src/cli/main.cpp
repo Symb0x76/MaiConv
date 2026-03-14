@@ -466,6 +466,7 @@ int main(int argc, char **argv) {
   bool assets_display = false;
   bool assets_decimal = false;
   bool assets_ignore = false;
+  bool assets_dummy = false;
   bool assets_resume = false;
   bool assets_number = false;
   bool assets_json = false;
@@ -510,6 +511,9 @@ int main(int argc, char **argv) {
   assets_cmd->add_option("--shift", assets_shift, "Shift by ticks");
   assets_cmd->add_flag("--decimal", assets_decimal, "Use decimal levels");
   assets_cmd->add_flag("--ignore", assets_ignore, "Ignore incomplete assets");
+  assets_cmd->add_flag(
+      "--dummy", assets_dummy,
+      "Generate dummy track.mp3/pv.mp4 when source media is missing");
   assets_cmd->add_flag("--resume,--skip-existing", assets_resume,
                        "Skip tracks that already have a complete export");
   assets_cmd->add_flag("--number", assets_number,
@@ -586,6 +590,7 @@ int main(int argc, char **argv) {
     options.shift_ticks = assets_shift;
     options.strict_decimal = assets_decimal;
     options.ignore_incomplete_assets = assets_ignore;
+    options.dummy_assets = assets_dummy;
     options.skip_existing_exports = assets_resume;
     options.music_id_folder_name = assets_number;
     options.log_tracks_json = assets_json;
@@ -740,10 +745,11 @@ int main(int argc, char **argv) {
   });
 
   auto *media_video_cmd = media_cmd->add_subcommand(
-      "video",
-      "Convert .dat/.usm -> pv.mp4, or .mp4 -> pv.dat (optional --template)");
+      "video", "Convert .dat/.usm/.crid -> pv.mp4, or .mp4 -> pv.dat (optional "
+               "--template)");
   media_video_cmd
-      ->add_option("--input", media_video_input, "Input .dat/.usm/.mp4 path")
+      ->add_option("--input", media_video_input,
+                   "Input .dat/.usm/.crid/.mp4 path")
       ->required();
   media_video_cmd->add_option("--template", media_video_template,
                               "Optional template .dat/.usm for .mp4 input "
@@ -761,10 +767,10 @@ int main(int argc, char **argv) {
 
     const auto ext = maiconv::lower(
         std::filesystem::path(media_video_input).extension().string());
-    if (ext == ".dat" || ext == ".usm") {
+    if (ext == ".dat" || ext == ".usm" || ext == ".crid") {
       if (!media_video_template.empty()) {
         throw CLI::ValidationError("--template",
-                                   "not needed for .dat/.usm input");
+                                   "not needed for .dat/.usm/.crid input");
       }
       exit_code = run_media_video_to_mp4(media_video_input, media_video_output);
       return;
@@ -786,7 +792,7 @@ int main(int argc, char **argv) {
       return;
     }
 
-    throw CLI::ValidationError("--input", "expected .dat/.usm/.mp4 file");
+    throw CLI::ValidationError("--input", "expected .dat/.usm/.crid/.mp4 file");
   });
   media_cmd->require_subcommand(1);
 

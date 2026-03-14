@@ -243,6 +243,99 @@ bool create_tiny_mp4_sample(const fs::path &output_mp4) {
          fs::file_size(output_mp4) > 0;
 }
 
+bool create_tiny_mpeg1_es_sample(const fs::path &output_m1v) {
+  if (output_m1v.has_parent_path()) {
+    std::error_code ec;
+    fs::create_directories(output_m1v.parent_path(), ec);
+  }
+
+  const std::string cmd =
+      "ffmpeg -y -loglevel error -f lavfi -i "
+      "color=c=black:s=16x16:d=0.2 -an -c:v mpeg1video -f mpeg1video \"" +
+      output_m1v.string() + "\"";
+  return std::system(cmd.c_str()) == 0 && fs::exists(output_m1v) &&
+         fs::file_size(output_m1v) > 0;
+}
+
+bool read_binary_payload(const fs::path &path,
+                         std::vector<unsigned char> &out) {
+  out.clear();
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return false;
+  }
+  in.seekg(0, std::ios::end);
+  const auto size = in.tellg();
+  if (size <= 0) {
+    return false;
+  }
+  in.seekg(0, std::ios::beg);
+  out.resize(static_cast<std::size_t>(size));
+  in.read(reinterpret_cast<char *>(out.data()),
+          static_cast<std::streamsize>(out.size()));
+  return in.gcount() == static_cast<std::streamsize>(out.size());
+}
+
+bool create_minimal_crid_usm_with_payload(
+    const fs::path &output_dat, const std::vector<unsigned char> &payload) {
+  if (payload.empty()) {
+    return false;
+  }
+
+  std::ofstream out(output_dat, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    return false;
+  }
+
+  {
+    std::array<unsigned char, 0x20> header{};
+    header[0] = static_cast<unsigned char>('C');
+    header[1] = static_cast<unsigned char>('R');
+    header[2] = static_cast<unsigned char>('I');
+    header[3] = static_cast<unsigned char>('D');
+    header[7] = 0x18U; // chunk size after header: 24 (metadata-only chunk)
+    header[9] = 0x18U; // payload offset from chunk header
+    header[15] = 0x01U;
+    out.write(reinterpret_cast<const char *>(header.data()),
+              static_cast<std::streamsize>(header.size()));
+  }
+
+  constexpr std::size_t kMaxPlainPayloadPerChunk = 0x200U;
+  std::size_t written = 0U;
+  while (written < payload.size()) {
+    const std::size_t this_chunk_size =
+        std::min(kMaxPlainPayloadPerChunk, payload.size() - written);
+
+    std::array<unsigned char, 0x20> header{};
+    header[0] = static_cast<unsigned char>('@');
+    header[1] = static_cast<unsigned char>('S');
+    header[2] = static_cast<unsigned char>('F');
+    header[3] = static_cast<unsigned char>('V');
+    const uint32_t chunk_size_after_header =
+        static_cast<uint32_t>(this_chunk_size);
+    header[4] =
+        static_cast<unsigned char>((chunk_size_after_header >> 24U) & 0xFFU);
+    header[5] =
+        static_cast<unsigned char>((chunk_size_after_header >> 16U) & 0xFFU);
+    header[6] =
+        static_cast<unsigned char>((chunk_size_after_header >> 8U) & 0xFFU);
+    header[7] = static_cast<unsigned char>(chunk_size_after_header & 0xFFU);
+    header[9] = 0U;
+    header[12] = 0U;
+    header[15] = 0U;
+
+    out.write(reinterpret_cast<const char *>(header.data()),
+              static_cast<std::streamsize>(header.size()));
+    out.write(reinterpret_cast<const char *>(
+                  payload.data() + static_cast<std::ptrdiff_t>(written)),
+              static_cast<std::streamsize>(this_chunk_size));
+    written += this_chunk_size;
+  }
+
+  out.flush();
+  return static_cast<bool>(out);
+}
+
 std::optional<std::size_t>
 probe_vp9_ivf_size_from_mp4(const fs::path &input_mp4,
                             const fs::path &output_ivf) {
@@ -287,7 +380,7 @@ TEST_CASE("media conversion fails cleanly for missing input files") {
   fs::remove_all(temp_root, ec);
 }
 
-TEST_CASE("media rejects non VP9 streams for video conversion") {
+TEST_CASE("media rejects non-container inputs for video conversion") {
   const fs::path temp_root =
       fs::temp_directory_path() / "maiconv_media_reject_non_vp9";
   std::error_code ec;
@@ -330,6 +423,34 @@ TEST_CASE("media rejects non VP9 streams for video conversion") {
 
   REQUIRE_FALSE(maiconv::convert_dat_or_usm_to_mp4(fake_mp4, output_mp4));
   REQUIRE_FALSE(maiconv::convert_dat_or_usm_to_mp4(fake_h264, output_mp4));
+
+  fs::remove_all(temp_root, ec);
+}
+
+TEST_CASE("media converts CRID-wrapped MPEG video stream to mp4") {
+  if (!is_ffmpeg_available()) {
+    SKIP("ffmpeg not found in PATH");
+  }
+
+  const fs::path temp_root =
+      fs::temp_directory_path() / "maiconv_media_crid_mpeg_to_mp4";
+  std::error_code ec;
+  fs::remove_all(temp_root, ec);
+  fs::create_directories(temp_root, ec);
+
+  const fs::path source_m1v = temp_root / "source.m1v";
+  REQUIRE(create_tiny_mpeg1_es_sample(source_m1v));
+
+  std::vector<unsigned char> payload;
+  REQUIRE(read_binary_payload(source_m1v, payload));
+
+  const fs::path source_dat = temp_root / "source.dat";
+  REQUIRE(create_minimal_crid_usm_with_payload(source_dat, payload));
+
+  const fs::path output_mp4 = temp_root / "output.mp4";
+  REQUIRE(maiconv::convert_dat_or_usm_to_mp4(source_dat, output_mp4));
+  REQUIRE(fs::exists(output_mp4));
+  REQUIRE(fs::file_size(output_mp4) > 0U);
 
   fs::remove_all(temp_root, ec);
 }

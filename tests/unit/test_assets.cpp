@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -178,6 +179,26 @@ void write_binary_file(const fs::path &path,
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   out.write(reinterpret_cast<const char *>(bytes.data()),
             static_cast<std::streamsize>(bytes.size()));
+}
+
+bool is_ffmpeg_available() {
+#if defined(_WIN32)
+  return std::system("ffmpeg -version >NUL 2>&1") == 0;
+#else
+  return std::system("ffmpeg -version >/dev/null 2>&1") == 0;
+#endif
+}
+
+bool create_tiny_png_with_ffmpeg(const fs::path &output_png) {
+  if (output_png.has_parent_path()) {
+    fs::create_directories(output_png.parent_path());
+  }
+  const std::string cmd =
+      "ffmpeg -y -loglevel error -f lavfi -i color=c=white:s=16x16:d=0.1 "
+      "-frames:v 1 \"" +
+      output_png.string() + "\"";
+  return std::system(cmd.c_str()) == 0 && fs::exists(output_png) &&
+         fs::file_size(output_png) > 0;
 }
 
 void create_complete_maidata_fixture_012340(const fs::path &assets_root) {
@@ -731,6 +752,48 @@ TEST_CASE("assets logs incomplete progress before failing without --ignore") {
   fs::remove_all(temp_root);
 }
 
+TEST_CASE(
+    "assets stops processing remaining tracks after incomplete fatal without "
+    "--ignore") {
+  const fs::path temp_root = unique_temp_dir("assets_incomplete_stop_early");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A046", "012341", "RawMediaSongFail", "GAME",
+               "PRISM");
+  create_compact_media_assets(assets_root / "A046", "012341");
+  create_track(assets_root / "A046", "012342", "ShouldNotProcess", "GAME",
+               "PRISM");
+  create_media_assets(assets_root / "A046", "012342");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.jobs = 1;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int result = run_compile_assets(options);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  REQUIRE(result == 2);
+  const std::string out = captured_out.str();
+  REQUIRE(out.find("Incomplete: 012341 RawMediaSongFail [DX]") !=
+          std::string::npos);
+  REQUIRE(out.find("ShouldNotProcess") == std::string::npos);
+  REQUIRE_FALSE(
+      fs::exists(output_root / "012342_ShouldNotProcess [DX]" / "maidata.txt"));
+  REQUIRE(captured_err.str().find("Incomplete assets found. Use --ignore to "
+                                  "continue.") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets verbose log level prints paths and immediate warnings") {
   const fs::path temp_root = unique_temp_dir("assets_progress_verbose");
   const fs::path assets_root = temp_root / "StreamingAssets";
@@ -812,6 +875,250 @@ TEST_CASE("assets supports pseudo assetbundle jacket in .ab") {
 
   fs::remove_all(temp_root);
 }
+
+TEST_CASE("assets supports jacket_s fallback when jacket is missing") {
+  const fs::path temp_root = unique_temp_dir("assets_jacket_s_fallback");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A045", "012340", "JacketSFallbackSong", "GAME",
+               "PRISM");
+
+  const fs::path db_root = assets_root / "A045";
+  fs::create_directories(db_root / "SoundData");
+  fs::create_directories(db_root / "AssetBundleImages" / "jacket_s");
+  fs::create_directories(db_root / "MovieData");
+
+  write_text_file(db_root / "SoundData" / "music002340.mp3", "dummy");
+  write_text_file(db_root / "MovieData" / "002340.mp4", "dummy");
+
+  // JPEG SOI marker is enough for pseudo-image fallback path.
+  write_binary_file(db_root / "AssetBundleImages" / "jacket_s" /
+                        "ui_jacket_002340_s.ab",
+                    {0xFFU, 0xD8U, 0xFFU, 0xE0U, 0x00U, 0x10U, 0xFFU, 0xD9U});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "012340_JacketSFallbackSong [DX]" /
+                     "maidata.txt"));
+  REQUIRE(fs::exists(output_root / "012340_JacketSFallbackSong [DX]" /
+                     "track.mp3"));
+  REQUIRE(
+      fs::exists(output_root / "012340_JacketSFallbackSong [DX]" / "pv.mp4"));
+  REQUIRE(
+      fs::exists(output_root / "012340_JacketSFallbackSong [DX]" / "bg.jpg"));
+  REQUIRE_FALSE(
+      fs::exists(output_root / "012340_JacketSFallbackSong [DX]_Incomplete"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets keeps raw CRID dat when mp4 conversion fails") {
+  const fs::path temp_root = unique_temp_dir("assets_keep_raw_crid_video");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A045", "011241", "RawCriVideoSong", "GAME",
+               "PRISM");
+
+  const fs::path db_root = assets_root / "A045";
+  fs::create_directories(db_root / "SoundData");
+  fs::create_directories(db_root / "AssetBundleImages");
+  fs::create_directories(db_root / "MovieData");
+
+  write_text_file(db_root / "SoundData" / "music001241.mp3", "dummy");
+  write_text_file(db_root / "AssetBundleImages" / "UI_Jacket_001241.png",
+                  "dummy");
+
+  // Minimal CRID-looking payload that ffmpeg cannot transcode.
+  write_binary_file(db_root / "MovieData" / "001241.dat",
+                    {0x43U, 0x52U, 0x49U, 0x44U, 0x00U, 0x00U, 0x00U, 0x00U,
+                     0x00U, 0x00U, 0x00U, 0x00U});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(
+      fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "maidata.txt"));
+  REQUIRE(
+      fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "track.mp3"));
+  REQUIRE(fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "bg.png"));
+  REQUIRE(fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "pv.dat"));
+  REQUIRE_FALSE(
+      fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "pv.mp4"));
+  REQUIRE_FALSE(
+      fs::exists(output_root / "011241_RawCriVideoSong [DX]_Incomplete"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets treats DEBUG_ movieName as optional video") {
+  const fs::path temp_root = unique_temp_dir("assets_debug_movie_optional");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A045", "100999", "DebugMovieSong", "UTAGE",
+               "PRISM");
+
+  const fs::path db_root = assets_root / "A045";
+  fs::create_directories(db_root / "SoundData");
+  fs::create_directories(db_root / "AssetBundleImages");
+  fs::create_directories(db_root / "MovieData");
+
+  write_text_file(db_root / "SoundData" / "music000999.mp3", "dummy");
+  write_text_file(db_root / "AssetBundleImages" / "UI_Jacket_000999.png",
+                  "dummy");
+
+  const std::string custom_xml =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<MusicData>\n"
+      "  <name><id>100999</id><str>DebugMovieSong</str></name>\n"
+      "  <sortName>DEBUGMOVIESONG</sortName>\n"
+      "  <genreName><id>107</id><str>宴会場</str></genreName>\n"
+      "  <artistName><id>0</id><str>Mock Artist</str></artistName>\n"
+      "  <bpm>120</bpm>\n"
+      "  <version>25007</version>\n"
+      "  <AddVersion><id>23</id><str>PRISM</str></AddVersion>\n"
+      "  <movieName><id>999</id><str>DEBUG_DebugMovieSong</str></movieName>\n"
+      "  <cueName><id>999</id><str>DebugMovieSong</str></cueName>\n"
+      "</MusicData>\n";
+  write_text_file(db_root / "music" / "music100999" / "Music.xml", custom_xml);
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "100999_DebugMovieSong" / "maidata.txt"));
+  REQUIRE(fs::exists(output_root / "100999_DebugMovieSong" / "track.mp3"));
+  REQUIRE(fs::exists(output_root / "100999_DebugMovieSong" / "bg.png"));
+  REQUIRE_FALSE(fs::exists(output_root / "100999_DebugMovieSong" / "pv.mp4"));
+  REQUIRE_FALSE(fs::exists(output_root / "100999_DebugMovieSong" / "pv.dat"));
+  REQUIRE_FALSE(fs::exists(output_root / "100999_DebugMovieSong_Incomplete"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets --dummy annotates generated track and pv from bg.png") {
+  if (!is_ffmpeg_available()) {
+    SKIP("ffmpeg not found in PATH");
+  }
+
+  const fs::path temp_root = unique_temp_dir("assets_dummy_with_bg");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A070", "000600", "DummyFromBgSong", "POPS",
+               "PRISM");
+
+  const fs::path db_root = assets_root / "A070";
+  fs::create_directories(db_root / "AssetBundleImages");
+  REQUIRE(create_tiny_png_with_ffmpeg(db_root / "AssetBundleImages" /
+                                      "UI_Jacket_000600.png"));
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.dummy_assets = true;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int result = run_compile_assets(options);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  INFO(captured_out.str());
+  INFO(captured_err.str());
+  REQUIRE(result == 0);
+  const fs::path exported = output_root / "000600_DummyFromBgSong";
+  REQUIRE(fs::exists(exported / "track.mp3"));
+  REQUIRE(fs::exists(exported / "pv.mp4"));
+  REQUIRE_FALSE(fs::exists(output_root / "000600_DummyFromBgSong_Incomplete"));
+
+  const std::string out = captured_out.str();
+  const std::string err = captured_err.str();
+  REQUIRE(out.find("Completed: 000600 DummyFromBgSong") != std::string::npos);
+  REQUIRE(out.find("[dummy:") != std::string::npos);
+  REQUIRE(out.find("MISSING_AUDIO") != std::string::npos);
+  REQUIRE(out.find("MISSING_VIDEO") != std::string::npos);
+  REQUIRE(out.find("SOURCE_BG_PNG") != std::string::npos);
+  REQUIRE(out.find("BLACK_FRAME") == std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000600:MISSING_AUDIO") != std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000600:MISSING_VIDEO") != std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000600:SOURCE_BG_PNG") != std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000600:BLACK_FRAME") == std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE(
+    "assets --dummy annotates generated black frame pv when bg is missing") {
+  if (!is_ffmpeg_available()) {
+    SKIP("ffmpeg not found in PATH");
+  }
+
+  const fs::path temp_root = unique_temp_dir("assets_dummy_black_video");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A071", "000601", "DummyBlackVideoSong", "POPS",
+               "PRISM");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.dummy_assets = true;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int result = run_compile_assets(options);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  INFO(captured_out.str());
+  INFO(captured_err.str());
+  REQUIRE(result == 0);
+  const fs::path exported = output_root / "000601_DummyBlackVideoSong";
+  REQUIRE(fs::exists(exported / "track.mp3"));
+  REQUIRE(fs::exists(exported / "pv.mp4"));
+  REQUIRE_FALSE(
+      fs::exists(output_root / "000601_DummyBlackVideoSong_Incomplete"));
+
+  const std::string out = captured_out.str();
+  const std::string err = captured_err.str();
+  REQUIRE(out.find("Completed: 000601 DummyBlackVideoSong") !=
+          std::string::npos);
+  REQUIRE(out.find("MISSING_AUDIO") != std::string::npos);
+  REQUIRE(out.find("MISSING_VIDEO") != std::string::npos);
+  REQUIRE(out.find("BLACK_FRAME") != std::string::npos);
+  REQUIRE(out.find("SOURCE_BG_PNG") == std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000601:MISSING_AUDIO") != std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000601:MISSING_VIDEO") != std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000601:BLACK_FRAME") != std::string::npos);
+  REQUIRE(err.find("MAICONV_DUMMY:000601:SOURCE_BG_PNG") == std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets exports selected id with all difficulties when difficulty is "
           "omitted") {
   const fs::path temp_root = unique_temp_dir("assets_id_all_diff");

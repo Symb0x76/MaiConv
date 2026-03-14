@@ -12,16 +12,19 @@ bool extract_unity_texture_bundle_to_png(const std::filesystem::path &ab_file,
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1201,6 +1204,8 @@ encrypt_usm_video_packet(const std::vector<uint8_t> &packet,
 enum class VideoCodec {
   kUnknown,
   kVp9Ivf,
+  kH264AnnexB,
+  kMpegVideo,
 };
 
 std::size_t find_vp9_ivf_start(const std::vector<uint8_t> &data) {
@@ -1238,9 +1243,63 @@ bool is_vp9_ivf_stream(const std::vector<uint8_t> &data) {
   return find_vp9_ivf_start(data) != std::string::npos;
 }
 
+bool is_h264_annexb_stream(const std::vector<uint8_t> &data) {
+  if (data.size() < 5U) {
+    return false;
+  }
+
+  auto is_h264_nal = [](uint8_t nal_header) {
+    const uint8_t nal_type = static_cast<uint8_t>(nal_header & 0x1FU);
+    return nal_type == 1U || nal_type == 5U || nal_type == 6U ||
+           nal_type == 7U || nal_type == 8U || nal_type == 9U;
+  };
+
+  for (std::size_t i = 0; i + 4U < data.size(); ++i) {
+    if (data[i] != 0U || data[i + 1U] != 0U) {
+      continue;
+    }
+
+    if (data[i + 2U] == 1U) {
+      if (is_h264_nal(data[i + 3U])) {
+        return true;
+      }
+      continue;
+    }
+
+    if (data[i + 2U] == 0U && data[i + 3U] == 1U && i + 4U < data.size()) {
+      if (is_h264_nal(data[i + 4U])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool is_mpeg_video_stream(const std::vector<uint8_t> &data) {
+  if (data.size() < 4U) {
+    return false;
+  }
+  for (std::size_t i = 0; i + 4U <= data.size(); ++i) {
+    if (data[i] != 0U || data[i + 1U] != 0U || data[i + 2U] != 1U) {
+      continue;
+    }
+    const uint8_t code = data[i + 3U];
+    if (code == 0x00U || code == 0xB3U || code == 0xB8U) {
+      return true;
+    }
+  }
+  return false;
+}
+
 VideoCodec detect_video_codec(const std::vector<uint8_t> &data) {
   if (is_vp9_ivf_stream(data)) {
     return VideoCodec::kVp9Ivf;
+  }
+  if (is_h264_annexb_stream(data)) {
+    return VideoCodec::kH264AnnexB;
+  }
+  if (is_mpeg_video_stream(data)) {
+    return VideoCodec::kMpegVideo;
   }
   return VideoCodec::kUnknown;
 }
@@ -1335,9 +1394,8 @@ bool extract_usm_video_stream(const std::filesystem::path &source,
     }
 
     channel.data.insert(channel.data.end(), decoded.begin(), decoded.end());
-    if (channel.codec == VideoCodec::kUnknown &&
-        is_vp9_ivf_stream(channel.data)) {
-      channel.codec = VideoCodec::kVp9Ivf;
+    if (channel.codec == VideoCodec::kUnknown) {
+      channel.codec = detect_video_codec(channel.data);
     }
   }
 
@@ -2158,6 +2216,82 @@ bool transcode_vp9_ivf_to_h264_mp4(const std::vector<uint8_t> &vp9_ivf,
   return fallback_ffmpeg_vp9_to_h264(vp9_ivf, target_mp4);
 }
 
+std::string usm_stream_extension(VideoCodec codec) {
+  switch (codec) {
+  case VideoCodec::kVp9Ivf:
+    return ".ivf";
+  case VideoCodec::kH264AnnexB:
+    return ".h264";
+  case VideoCodec::kMpegVideo:
+    return ".m1v";
+  default:
+    return ".bin";
+  }
+}
+
+bool remux_extracted_stream_to_mp4(const std::filesystem::path &stream_file,
+                                   const std::filesystem::path &target_mp4) {
+  if (!file_non_empty(stream_file)) {
+    return false;
+  }
+  if (!target_mp4.parent_path().empty()) {
+    std::filesystem::create_directories(target_mp4.parent_path());
+  }
+
+#if defined(_WIN32)
+  std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+  args.insert(args.end(), {L"-i", stream_file.wstring(), L"-an", L"-c:v",
+                           L"copy", target_mp4.wstring()});
+  const bool ok = run_ffmpeg_process(args);
+#else
+  std::vector<std::string> args = {"-y", "-loglevel", "error"};
+  args.insert(args.end(), {"-i", path_to_utf8(stream_file), "-an", "-c:v",
+                           "copy", path_to_utf8(target_mp4)});
+  const bool ok = run_ffmpeg_process(args);
+#endif
+  return ok && file_non_empty(target_mp4);
+}
+
+bool transcode_extracted_stream_to_h264_mp4(
+    const std::filesystem::path &stream_file,
+    const std::filesystem::path &target_mp4) {
+  if (!file_non_empty(stream_file)) {
+    return false;
+  }
+  if (!target_mp4.parent_path().empty()) {
+    std::filesystem::create_directories(target_mp4.parent_path());
+  }
+
+  const auto h264_encoders = resolve_ffmpeg_h264_encoders();
+  if (h264_encoders.empty()) {
+    return false;
+  }
+
+  for (const auto &encoder : h264_encoders) {
+    remove_file_if_exists(target_mp4);
+#if defined(_WIN32)
+    std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(), {L"-i", stream_file.wstring(), L"-an", L"-c:v",
+                             widen_ascii(encoder), L"-pix_fmt", L"yuv420p",
+                             target_mp4.wstring()});
+    const bool ok = run_ffmpeg_process(args);
+#else
+    std::vector<std::string> args = {"-y", "-loglevel", "error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(),
+                {"-i", path_to_utf8(stream_file), "-an", "-c:v", encoder,
+                 "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
+    const bool ok = run_ffmpeg_process(args);
+#endif
+    if (ok && file_non_empty(target_mp4)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 bool convert_usm_to_mp4(const std::filesystem::path &source,
                         const std::filesystem::path &target_mp4) {
   UsmVideoStream stream;
@@ -2165,11 +2299,24 @@ bool convert_usm_to_mp4(const std::filesystem::path &source,
     return false;
   }
 
-  if (stream.codec != VideoCodec::kVp9Ivf) {
+  if (stream.codec == VideoCodec::kVp9Ivf) {
+    return transcode_vp9_ivf_to_h264_mp4(stream.data, target_mp4);
+  }
+
+  const auto tmp_dir = make_temp_work_dir();
+  const auto stream_file =
+      tmp_dir / ("video_stream" + usm_stream_extension(stream.codec));
+  if (!write_binary_file(stream_file, stream.data)) {
     return false;
   }
 
-  return transcode_vp9_ivf_to_h264_mp4(stream.data, target_mp4);
+  remove_file_if_exists(target_mp4);
+  if (remux_extracted_stream_to_mp4(stream_file, target_mp4)) {
+    return true;
+  }
+
+  remove_file_if_exists(target_mp4);
+  return transcode_extracted_stream_to_h264_mp4(stream_file, target_mp4);
 }
 
 struct Afs2Entry {
@@ -2661,6 +2808,130 @@ bool convert_dat_or_usm_to_mp4(const std::filesystem::path &source,
     const bool fallback_ok = run_ffmpeg_process(args);
 #endif
     if (fallback_ok && file_non_empty(target_mp4)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool generate_silent_mp3(const std::filesystem::path &target_mp3,
+                         double duration_seconds) {
+  if (!std::isfinite(duration_seconds) || duration_seconds <= 0.0) {
+    duration_seconds = 1.0;
+  }
+  if (!target_mp3.parent_path().empty()) {
+    std::filesystem::create_directories(target_mp3.parent_path());
+  }
+
+  const auto mp3_encoders = resolve_ffmpeg_mp3_encoders();
+  if (mp3_encoders.empty()) {
+    return false;
+  }
+
+  std::ostringstream duration_ss;
+  duration_ss << std::fixed << std::setprecision(3) << duration_seconds;
+  const std::string duration_arg = duration_ss.str();
+
+  for (const auto &encoder : mp3_encoders) {
+    remove_file_if_exists(target_mp3);
+#if defined(_WIN32)
+    std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+    append_audio_hwaccel_arg(args);
+    args.insert(args.end(),
+                {L"-f", L"lavfi", L"-i",
+                 L"anullsrc=channel_layout=stereo:sample_rate=44100", L"-t",
+                 widen_ascii(duration_arg), L"-vn", L"-c:a",
+                 widen_ascii(encoder), target_mp3.wstring()});
+    const bool ok = run_ffmpeg_process(args);
+#else
+    std::vector<std::string> args = {"-y", "-loglevel", "error"};
+    append_audio_hwaccel_arg(args);
+    args.insert(args.end(), {"-f", "lavfi", "-i",
+                             "anullsrc=channel_layout=stereo:sample_rate=44100",
+                             "-t", duration_arg, "-vn", "-c:a", encoder,
+                             path_to_utf8(target_mp3)});
+    const bool ok = run_ffmpeg_process(args);
+#endif
+    if (ok && file_non_empty(target_mp3)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool generate_single_frame_mp4_from_image(
+    const std::filesystem::path &source_image,
+    const std::filesystem::path &target_mp4) {
+  if (!file_non_empty(source_image)) {
+    return false;
+  }
+  if (!target_mp4.parent_path().empty()) {
+    std::filesystem::create_directories(target_mp4.parent_path());
+  }
+
+  const auto h264_encoders = resolve_ffmpeg_h264_encoders();
+  if (h264_encoders.empty()) {
+    return false;
+  }
+
+  for (const auto &encoder : h264_encoders) {
+    remove_file_if_exists(target_mp4);
+#if defined(_WIN32)
+    std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(),
+                {L"-loop", L"1", L"-i", source_image.wstring(), L"-frames:v",
+                 L"1", L"-an", L"-c:v", widen_ascii(encoder), L"-pix_fmt",
+                 L"yuv420p", target_mp4.wstring()});
+    const bool ok = run_ffmpeg_process(args);
+#else
+    std::vector<std::string> args = {"-y", "-loglevel", "error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(), {"-loop", "1", "-i", path_to_utf8(source_image),
+                             "-frames:v", "1", "-an", "-c:v", encoder,
+                             "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
+    const bool ok = run_ffmpeg_process(args);
+#endif
+    if (ok && file_non_empty(target_mp4)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool generate_single_frame_black_mp4(const std::filesystem::path &target_mp4) {
+  if (!target_mp4.parent_path().empty()) {
+    std::filesystem::create_directories(target_mp4.parent_path());
+  }
+
+  const auto h264_encoders = resolve_ffmpeg_h264_encoders();
+  if (h264_encoders.empty()) {
+    return false;
+  }
+
+  for (const auto &encoder : h264_encoders) {
+    remove_file_if_exists(target_mp4);
+#if defined(_WIN32)
+    std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(),
+                {L"-f", L"lavfi", L"-i", L"color=c=black:s=1280x720:r=1",
+                 L"-frames:v", L"1", L"-an", L"-c:v", widen_ascii(encoder),
+                 L"-pix_fmt", L"yuv420p", target_mp4.wstring()});
+    const bool ok = run_ffmpeg_process(args);
+#else
+    std::vector<std::string> args = {"-y", "-loglevel", "error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(),
+                {"-f", "lavfi", "-i", "color=c=black:s=1280x720:r=1",
+                 "-frames:v", "1", "-an", "-c:v", encoder, "-pix_fmt",
+                 "yuv420p", path_to_utf8(target_mp4)});
+    const bool ok = run_ffmpeg_process(args);
+#endif
+    if (ok && file_non_empty(target_mp4)) {
       return true;
     }
   }

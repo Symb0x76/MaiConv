@@ -33,6 +33,11 @@ namespace {
 
 constexpr int kSuccess = 0;
 constexpr int kFailure = 2;
+constexpr const char *kDummyWarningPrefix = "MAICONV_DUMMY";
+constexpr const char *kDummyTagMissingAudio = "MISSING_AUDIO";
+constexpr const char *kDummyTagMissingVideo = "MISSING_VIDEO";
+constexpr const char *kDummyTagSourceBgPng = "SOURCE_BG_PNG";
+constexpr const char *kDummyTagBlackFrame = "BLACK_FRAME";
 
 std::optional<std::string>
 detect_image_extension_by_magic(const std::filesystem::path &path) {
@@ -60,6 +65,45 @@ detect_image_extension_by_magic(const std::filesystem::path &path) {
   return std::nullopt;
 }
 
+bool file_non_empty(const std::filesystem::path &path) {
+  std::error_code ec;
+  return std::filesystem::exists(path, ec) &&
+         std::filesystem::is_regular_file(path, ec) &&
+         std::filesystem::file_size(path, ec) > 0;
+}
+
+bool is_crid_container_file(const std::filesystem::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return false;
+  }
+
+  std::array<char, 4> magic{};
+  in.read(magic.data(), static_cast<std::streamsize>(magic.size()));
+  if (in.gcount() < static_cast<std::streamsize>(magic.size())) {
+    return false;
+  }
+  return magic[0] == 'C' && magic[1] == 'R' && magic[2] == 'I' &&
+         magic[3] == 'D';
+}
+
+double estimate_chart_duration_seconds(const Chart &chart) {
+  int max_tick = 0;
+  for (const auto &note : chart.notes()) {
+    int note_end = note.tick_stamp(chart.definition());
+    if (note.wait_ticks > 0) {
+      note_end += note.wait_ticks;
+    }
+    if (note.last_ticks > 0) {
+      note_end += note.last_ticks;
+    }
+    if (note_end > max_tick) {
+      max_tick = note_end;
+    }
+  }
+  return chart.ticks_to_seconds(max_tick);
+}
+
 int to_int(const std::string &s, int fallback = 0) {
   try {
     return std::stoi(s);
@@ -85,6 +129,9 @@ struct TrackInfo {
   std::string version;
   std::string composer;
   std::string bpm;
+  std::string cue_id;
+  std::string movie_id;
+  bool movie_debug_placeholder = false;
   bool zero_based_difficulty = false;
   std::map<int, DifficultyInfo> difficulties;
   std::map<std::string, int> chart_output_difficulties;
@@ -104,6 +151,8 @@ TrackInfo default_track_info(const std::string &fallback_id) {
   info.version = "Unknown";
   info.composer = "Unknown";
   info.bpm = "120";
+  info.cue_id = info.id;
+  info.movie_id = info.id;
   info.is_dx = info.id.size() >= 2 && info.id[1] == '1';
   info.is_utage = info.id.size() >= 1 && info.id[0] == '1';
   return info;
@@ -357,6 +406,31 @@ TrackInfo parse_track_info(const std::filesystem::path &music_xml,
   if (auto *bpm = find_first_element_by_name(root, "bpm")) {
     info.bpm = element_text(bpm);
   }
+  if (auto *cue = find_first_element_by_name(root, "cueName")) {
+    if (auto *cue_id = cue->FirstChildElement("id")) {
+      const std::string parsed = trim(element_text(cue_id));
+      if (!parsed.empty() &&
+          std::all_of(parsed.begin(), parsed.end(),
+                      [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        info.cue_id = pad_music_id(parsed, 6);
+      }
+    }
+  }
+  if (auto *movie = find_first_element_by_name(root, "movieName")) {
+    if (auto *movie_id = movie->FirstChildElement("id")) {
+      const std::string parsed = trim(element_text(movie_id));
+      if (!parsed.empty() &&
+          std::all_of(parsed.begin(), parsed.end(),
+                      [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        info.movie_id = pad_music_id(parsed, 6);
+      }
+    }
+    if (auto *movie_name = movie->FirstChildElement("str")) {
+      const std::string parsed = lower(trim(element_text(movie_name)));
+      info.movie_debug_placeholder =
+          parsed.size() >= 6 && parsed.rfind("debug_", 0) == 0;
+    }
+  }
 
   std::string candidate_id;
   if (name_element != nullptr) {
@@ -372,6 +446,8 @@ TrackInfo parse_track_info(const std::filesystem::path &music_xml,
   }
 
   info.id = pad_music_id(info.id, 6);
+  info.cue_id = pad_music_id(info.cue_id, 6);
+  info.movie_id = pad_music_id(info.movie_id, 6);
   info.is_dx = info.id.size() >= 2 && info.id[1] == '1';
   info.is_utage = info.id.size() >= 1 && info.id[0] == '1';
 
@@ -956,6 +1032,18 @@ void push_warning(std::vector<std::string> &warnings, std::string warning) {
   warnings.push_back(std::move(warning));
 }
 
+void append_dummy_tag(std::vector<std::string> &dummy_outputs,
+                      std::vector<std::string> &warnings,
+                      const std::string &track_id, const std::string &tag) {
+  const std::size_t old_size = dummy_outputs.size();
+  append_unique_string(dummy_outputs, tag);
+  if (dummy_outputs.size() == old_size) {
+    return;
+  }
+  push_warning(warnings,
+               std::string(kDummyWarningPrefix) + ":" + track_id + ":" + tag);
+}
+
 std::filesystem::path
 expected_track_chart_path(const std::filesystem::path &track_output,
                           ChartFormat format) {
@@ -990,7 +1078,8 @@ bool has_complete_track_output(const std::filesystem::path &track_output,
 void emit_track_output(const TrackInfo &info,
                        const std::filesystem::path &output_path,
                        bool incomplete, bool skipped_existing,
-                       AssetsLogLevel log_level) {
+                       AssetsLogLevel log_level,
+                       const std::vector<std::string> &dummy_outputs) {
   if (log_level == AssetsLogLevel::Quiet) {
     return;
   }
@@ -1003,6 +1092,16 @@ void emit_track_output(const TrackInfo &info,
   std::cout << info.id << " " << export_display_title(info);
   if (log_level == AssetsLogLevel::Verbose) {
     std::cout << " -> " << path_to_utf8(output_path);
+  }
+  if (!dummy_outputs.empty()) {
+    std::cout << " [dummy: ";
+    for (std::size_t i = 0; i < dummy_outputs.size(); ++i) {
+      if (i != 0) {
+        std::cout << ", ";
+      }
+      std::cout << dummy_outputs[i];
+    }
+    std::cout << "]";
   }
   std::cout << "\n";
   std::cout.flush();
@@ -1253,6 +1352,7 @@ struct TrackProcessResult {
   std::optional<std::pair<int, std::string>> compiled_track;
   std::optional<std::pair<std::string, std::string>> collection_entry;
   std::vector<std::string> warnings;
+  std::vector<std::string> dummy_outputs;
   std::optional<std::string> fatal_error;
   AssetsTimingSummary timing;
 };
@@ -1422,6 +1522,7 @@ process_track_folder(const std::filesystem::path &folder,
     SimaiComposer simai_composer;
 
     std::map<int, std::string> inotes;
+    double longest_chart_seconds = 0.0;
     std::chrono::steady_clock::duration ma2_duration{};
     std::chrono::steady_clock::duration write_duration{};
     for (const auto &ma2_file : ma2_files) {
@@ -1434,6 +1535,8 @@ process_track_folder(const std::filesystem::path &folder,
       if (options.shift_ticks != 0) {
         transformed.shift_by_offset(options.shift_ticks);
       }
+      longest_chart_seconds = std::max(
+          longest_chart_seconds, estimate_chart_duration_seconds(transformed));
 
       if (options.format == ChartFormat::Simai ||
           options.format == ChartFormat::SimaiFes ||
@@ -1467,7 +1570,9 @@ process_track_folder(const std::filesystem::path &folder,
       result.timing.write_zip.add(write_duration);
     }
 
-    bool incomplete = false;
+    bool audio_incomplete = false;
+    bool cover_incomplete = false;
+    bool video_incomplete = false;
 
     int id_number = to_int(info.id, 0);
     if (id_number < 0) {
@@ -1477,6 +1582,14 @@ process_track_folder(const std::filesystem::path &folder,
         pad_music_id(std::to_string(id_number % 10000), 6);
     const std::string short_id =
         non_dx_id.size() >= 2 ? non_dx_id.substr(2) : non_dx_id;
+    const std::string cue_id =
+        info.cue_id.empty() ? non_dx_id : pad_music_id(info.cue_id, 6);
+    const std::string cue_short_id =
+        cue_id.size() >= 2 ? cue_id.substr(2) : cue_id;
+    const std::string movie_id =
+        info.movie_id.empty() ? non_dx_id : pad_music_id(info.movie_id, 6);
+    const std::string movie_short_id =
+        movie_id.size() >= 2 ? movie_id.substr(2) : movie_id;
 
     const auto media_begin = std::chrono::steady_clock::now();
     std::vector<std::string> stems;
@@ -1486,10 +1599,12 @@ process_track_folder(const std::filesystem::path &folder,
 
     if (!music_bases.empty()) {
       stems.clear();
-      stems.reserve(3);
+      stems.reserve(6);
       append_unique_string(stems, "music" + info.id);
       append_unique_string(stems, "music" + non_dx_id);
       append_unique_string(stems, "music00" + short_id);
+      append_unique_string(stems, "music" + cue_id);
+      append_unique_string(stems, "music00" + cue_short_id);
 
       append_suffix_candidates(stems, {".mp3", ".ogg"}, primary_candidates);
       append_suffix_candidates(stems, {".acb", ".awb"}, secondary_candidates);
@@ -1518,7 +1633,7 @@ process_track_folder(const std::filesystem::path &folder,
                 result.warnings,
                 "Audio conversion failed: " + path_to_utf8(compressed_audio) +
                     " -> " + path_to_utf8(track_output / "track.mp3"));
-            incomplete = true;
+            audio_incomplete = true;
           }
         }
       } else {
@@ -1541,22 +1656,30 @@ process_track_folder(const std::filesystem::path &folder,
                 "Audio conversion failed: " + path_to_utf8(acb_source) + " + " +
                     path_to_utf8(awb_source) + " -> " +
                     path_to_utf8(track_output / "track.mp3"));
-            incomplete = true;
+            audio_incomplete = true;
           }
         } else {
           push_warning(result.warnings,
                        "Music missing: " + info.name + " (" + info.id + ")");
-          incomplete = true;
+          audio_incomplete = true;
         }
       }
     }
     if (!cover_bases.empty()) {
       stems.clear();
-      stems.reserve(4);
+      stems.reserve(8);
       append_unique_string(stems, "UI_Jacket_" + info.id);
       append_unique_string(stems, "UI_Jacket_00" + short_id);
       append_unique_string(stems, "ui_jacket_" + info.id);
       append_unique_string(stems, "ui_jacket_" + non_dx_id);
+      append_unique_string(stems, "ui_jacket_" + info.id + "_s");
+      append_unique_string(stems, "ui_jacket_" + non_dx_id + "_s");
+      append_unique_string(stems, "UI_Jacket_" + movie_id);
+      append_unique_string(stems, "UI_Jacket_00" + movie_short_id);
+      append_unique_string(stems, "ui_jacket_" + movie_id);
+      append_unique_string(stems, "ui_jacket_00" + movie_short_id);
+      append_unique_string(stems, "ui_jacket_" + movie_id + "_s");
+      append_unique_string(stems, "ui_jacket_00" + movie_short_id + "_s");
 
       append_suffix_candidates(stems, {".png", ".jpg", ".jpeg"},
                                primary_candidates);
@@ -1564,9 +1687,13 @@ process_track_folder(const std::filesystem::path &folder,
           stems, "jacket/", {".png", ".jpg", ".jpeg"}, secondary_candidates);
       std::vector<std::string> image_names;
       image_names.reserve(primary_candidates.size() +
-                          secondary_candidates.size());
+                          secondary_candidates.size() + (stems.size() * 3));
       image_names.insert(image_names.end(), primary_candidates.begin(),
                          primary_candidates.end());
+      image_names.insert(image_names.end(), secondary_candidates.begin(),
+                         secondary_candidates.end());
+      append_prefixed_suffix_candidates(
+          stems, "jacket_s/", {".png", ".jpg", ".jpeg"}, secondary_candidates);
       image_names.insert(image_names.end(), secondary_candidates.begin(),
                          secondary_candidates.end());
 
@@ -1574,9 +1701,14 @@ process_track_folder(const std::filesystem::path &folder,
       append_prefixed_suffix_candidates(stems, "jacket/", {".ab"},
                                         secondary_candidates);
       std::vector<std::string> ab_names;
-      ab_names.reserve(primary_candidates.size() + secondary_candidates.size());
+      ab_names.reserve(primary_candidates.size() + secondary_candidates.size() +
+                       stems.size());
       ab_names.insert(ab_names.end(), primary_candidates.begin(),
                       primary_candidates.end());
+      ab_names.insert(ab_names.end(), secondary_candidates.begin(),
+                      secondary_candidates.end());
+      append_prefixed_suffix_candidates(stems, "jacket_s/", {".ab"},
+                                        secondary_candidates);
       ab_names.insert(ab_names.end(), secondary_candidates.begin(),
                       secondary_candidates.end());
 
@@ -1614,23 +1746,26 @@ process_track_folder(const std::filesystem::path &folder,
                   result.warnings,
                   "Cover conversion failed: " + path_to_utf8(cover_ab) +
                       " -> " + path_to_utf8(track_output / "bg.png"));
-              incomplete = true;
+              cover_incomplete = true;
             }
           }
         } else {
           push_warning(result.warnings,
                        "Cover missing: " + info.name + " (" + info.id + ")");
-          incomplete = true;
+          cover_incomplete = true;
         }
       }
     }
     if (!video_bases.empty()) {
       stems.clear();
-      stems.reserve(4);
+      stems.reserve(8);
       append_unique_string(stems, info.id);
       append_unique_string(stems, non_dx_id);
       append_unique_string(stems, "00" + short_id);
       append_unique_string(stems, short_id);
+      append_unique_string(stems, movie_id);
+      append_unique_string(stems, "00" + movie_short_id);
+      append_unique_string(stems, movie_short_id);
 
       append_suffix_candidates(stems, {".mp4"}, primary_candidates);
       const std::vector<std::string> video_mp4_names = primary_candidates;
@@ -1638,16 +1773,20 @@ process_track_folder(const std::filesystem::path &folder,
       const std::vector<std::string> video_dat_names = primary_candidates;
       append_suffix_candidates(stems, {".usm"}, primary_candidates);
       const std::vector<std::string> video_usm_names = primary_candidates;
+      append_suffix_candidates(stems, {".crid"}, primary_candidates);
+      const std::vector<std::string> video_crid_names = primary_candidates;
 
       lookup_names.clear();
       lookup_names.reserve(video_mp4_names.size() + video_dat_names.size() +
-                           video_usm_names.size());
+                           video_usm_names.size() + video_crid_names.size());
       lookup_names.insert(lookup_names.end(), video_mp4_names.begin(),
                           video_mp4_names.end());
       lookup_names.insert(lookup_names.end(), video_dat_names.begin(),
                           video_dat_names.end());
       lookup_names.insert(lookup_names.end(), video_usm_names.begin(),
                           video_usm_names.end());
+      lookup_names.insert(lookup_names.end(), video_crid_names.begin(),
+                          video_crid_names.end());
       const auto found_video =
           find_asset_candidates_in_indexes(video_indexes, lookup_names);
 
@@ -1664,23 +1803,108 @@ process_track_folder(const std::filesystem::path &folder,
           video_source =
               first_found_candidate_in_order(found_video, video_usm_names);
         }
+        if (video_source.empty()) {
+          video_source =
+              first_found_candidate_in_order(found_video, video_crid_names);
+        }
 
         if (video_source.empty()) {
-          push_warning(result.warnings,
-                       "Video missing: " + info.name + " (" + info.id + ")");
-          incomplete = true;
+          if (info.movie_debug_placeholder) {
+            push_warning(result.warnings,
+                         "Video missing (debug movie placeholder): " +
+                             info.name + " (" + info.id + ")");
+          } else {
+            push_warning(result.warnings,
+                         "Video missing: " + info.name + " (" + info.id + ")");
+            video_incomplete = true;
+          }
         } else {
           if (!convert_dat_or_usm_to_mp4(video_source,
                                          track_output / "pv.mp4")) {
-            push_warning(
-                result.warnings,
-                "Video conversion failed: " + path_to_utf8(video_source) +
-                    " -> " + path_to_utf8(track_output / "pv.mp4"));
-            incomplete = true;
+            bool kept_raw_video = false;
+            const std::string raw_ext =
+                lower(video_source.extension().string());
+            if ((raw_ext == ".dat" || raw_ext == ".usm" ||
+                 raw_ext == ".crid") &&
+                is_crid_container_file(video_source)) {
+              const auto raw_target = track_output / ("pv" + raw_ext);
+              std::error_code copy_ec;
+              std::filesystem::copy_file(
+                  video_source, raw_target,
+                  std::filesystem::copy_options::overwrite_existing, copy_ec);
+              if (!copy_ec && file_non_empty(raw_target)) {
+                std::error_code remove_ec;
+                std::filesystem::remove(track_output / "pv.mp4", remove_ec);
+                push_warning(result.warnings,
+                             "Video conversion failed, kept raw video: " +
+                                 path_to_utf8(video_source) + " -> " +
+                                 path_to_utf8(raw_target));
+                kept_raw_video = true;
+              }
+            }
+
+            if (!kept_raw_video) {
+              push_warning(
+                  result.warnings,
+                  "Video conversion failed: " + path_to_utf8(video_source) +
+                      " -> " + path_to_utf8(track_output / "pv.mp4"));
+              video_incomplete = true;
+            }
           }
         }
       }
     }
+
+    if (options.dummy_assets) {
+      const auto track_mp3 = track_output / "track.mp3";
+      if (!file_non_empty(track_mp3)) {
+        const double dummy_duration_seconds =
+            std::max(1.0, longest_chart_seconds);
+        if (generate_silent_mp3(track_mp3, dummy_duration_seconds)) {
+          audio_incomplete = false;
+          append_dummy_tag(result.dummy_outputs, result.warnings, info.id,
+                           kDummyTagMissingAudio);
+        } else {
+          push_warning(result.warnings, "Dummy audio generation failed: " +
+                                            path_to_utf8(track_mp3));
+          audio_incomplete = true;
+        }
+      }
+
+      const auto pv_mp4 = track_output / "pv.mp4";
+      if (!file_non_empty(pv_mp4)) {
+        const auto bg_png = track_output / "bg.png";
+        bool dummy_video_ok = false;
+        if (file_non_empty(bg_png)) {
+          dummy_video_ok = generate_single_frame_mp4_from_image(bg_png, pv_mp4);
+          if (dummy_video_ok) {
+            append_dummy_tag(result.dummy_outputs, result.warnings, info.id,
+                             kDummyTagMissingVideo);
+            append_dummy_tag(result.dummy_outputs, result.warnings, info.id,
+                             kDummyTagSourceBgPng);
+          }
+        } else {
+          dummy_video_ok = generate_single_frame_black_mp4(pv_mp4);
+          if (dummy_video_ok) {
+            append_dummy_tag(result.dummy_outputs, result.warnings, info.id,
+                             kDummyTagMissingVideo);
+            append_dummy_tag(result.dummy_outputs, result.warnings, info.id,
+                             kDummyTagBlackFrame);
+          }
+        }
+
+        if (dummy_video_ok) {
+          video_incomplete = false;
+        } else {
+          push_warning(result.warnings, "Dummy video generation failed: " +
+                                            path_to_utf8(pv_mp4));
+          video_incomplete = true;
+        }
+      }
+    }
+
+    const bool incomplete =
+        audio_incomplete || cover_incomplete || video_incomplete;
     result.timing.media.add(std::chrono::steady_clock::now() - media_begin);
 
     if (incomplete && !options.ignore_incomplete_assets) {
@@ -1879,7 +2103,7 @@ int run_compile_assets(const AssetsOptions &options) {
               progress_output_mutex);
           emit_track_output(result.info, result.final_track_output,
                             result.incomplete, result.skipped_existing,
-                            options.log_level);
+                            options.log_level, result.dummy_outputs);
         };
 
     if (worker_count <= 1) {
@@ -1889,17 +2113,27 @@ int run_compile_assets(const AssetsOptions &options) {
             music_bases, cover_bases, video_bases, music_indexes, cover_indexes,
             video_indexes, output_path_mutex_pool);
         emit_track_progress_immediately(results[i]);
+        if (results[i].fatal_error.has_value()) {
+          break;
+        }
       }
     } else {
       std::atomic<std::size_t> next_index{0};
+      std::atomic<bool> stop_processing{false};
       std::vector<std::thread> workers;
       workers.reserve(worker_count);
       for (std::size_t i = 0; i < worker_count; ++i) {
         workers.emplace_back([&]() {
           while (true) {
+            if (stop_processing.load(std::memory_order_relaxed)) {
+              return;
+            }
             const std::size_t index =
                 next_index.fetch_add(1, std::memory_order_relaxed);
             if (index >= folders.size()) {
+              return;
+            }
+            if (stop_processing.load(std::memory_order_relaxed)) {
               return;
             }
             results[index] = process_track_folder(
@@ -1907,6 +2141,9 @@ int run_compile_assets(const AssetsOptions &options) {
                 music_bases, cover_bases, video_bases, music_indexes,
                 cover_indexes, video_indexes, output_path_mutex_pool);
             emit_track_progress_immediately(results[index]);
+            if (results[index].fatal_error.has_value()) {
+              stop_processing.store(true, std::memory_order_relaxed);
+            }
           }
         });
       }
