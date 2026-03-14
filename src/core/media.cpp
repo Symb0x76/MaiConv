@@ -7,11 +7,6 @@ bool extract_unity_texture_bundle_to_png(const std::filesystem::path &ab_file,
                                          const std::filesystem::path &png_file);
 }
 
-extern "C" {
-#include "layer3.h"
-#include "libvgmstream.h"
-}
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -37,16 +32,6 @@ extern "C" {
 #include <sys/wait.h>
 #include <unistd.h>
 extern char **environ;
-#endif
-
-#if MAICONV_HAS_LIBAV
-extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/error.h>
-#include <libavutil/mathematics.h>
-#include <libavutil/opt.h>
-}
 #endif
 
 namespace maiconv {
@@ -254,8 +239,183 @@ std::filesystem::path make_temp_work_dir() {
 #endif
 }
 
+std::optional<std::string> read_non_empty_env(const char *name) {
+#if defined(_WIN32)
+  char *value = nullptr;
+  std::size_t value_len = 0;
+  const errno_t rc = _dupenv_s(&value, &value_len, name);
+  if (rc != 0 || value == nullptr || value[0] == '\0') {
+    if (value != nullptr) {
+      std::free(value);
+    }
+    return std::nullopt;
+  }
+  std::string out(value);
+  std::free(value);
+  return out;
+#else
+  const char *value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return std::nullopt;
+  }
+  return std::string(value);
+#endif
+}
+
+#if defined(_WIN32)
+std::optional<std::wstring> read_non_empty_wenv(const wchar_t *name) {
+  wchar_t *value = nullptr;
+  std::size_t value_len = 0;
+  const errno_t rc = _wdupenv_s(&value, &value_len, name);
+  if (rc != 0 || value == nullptr || value[0] == L'\0') {
+    if (value != nullptr) {
+      std::free(value);
+    }
+    return std::nullopt;
+  }
+  std::wstring out(value);
+  std::free(value);
+  return out;
+}
+#endif
+
+std::optional<std::string>
+normalize_hwaccel_env_value(const std::string &value) {
+  const std::string normalized = lower(value);
+  if (normalized == "0" || normalized == "false" || normalized == "off" ||
+      normalized == "none") {
+    return std::nullopt;
+  }
+  if (normalized == "1" || normalized == "true" || normalized == "on" ||
+      normalized == "yes") {
+    return std::string("auto");
+  }
+  return value;
+}
+
+std::optional<std::string> resolve_ffmpeg_hwaccel() {
+  const auto value = read_non_empty_env("MAICONV_FFMPEG_HWACCEL");
+  if (value.has_value()) {
+    return normalize_hwaccel_env_value(*value);
+  }
+
+  const auto gpu_mode = read_non_empty_env("MAICONV_FFMPEG_GPU");
+  if (!gpu_mode.has_value()) {
+    return std::nullopt;
+  }
+  const std::string normalized = lower(*gpu_mode);
+  if (normalized == "0" || normalized == "false" || normalized == "off" ||
+      normalized == "no") {
+    return std::nullopt;
+  }
+  return std::string("auto");
+}
+
+std::optional<std::string> resolve_ffmpeg_audio_hwaccel() {
+  const auto audio_value = read_non_empty_env("MAICONV_FFMPEG_AUDIO_HWACCEL");
+  if (audio_value.has_value()) {
+    return normalize_hwaccel_env_value(*audio_value);
+  }
+  return resolve_ffmpeg_hwaccel();
+}
+
+std::string resolve_ffmpeg_mp3_encoder() {
+  if (const auto value = read_non_empty_env("MAICONV_FFMPEG_MP3_ENCODER");
+      value.has_value()) {
+    return *value;
+  }
+  return "libmp3lame";
+}
+
+void append_unique_string(std::vector<std::string> &out,
+                          const std::string &value) {
+  if (value.empty()) {
+    return;
+  }
+  if (std::find(out.begin(), out.end(), value) == out.end()) {
+    out.push_back(value);
+  }
+}
+
+[[maybe_unused]] void append_audio_hwaccel_arg(std::vector<std::string> &args) {
+  const auto hwaccel = resolve_ffmpeg_audio_hwaccel();
+  if (!hwaccel.has_value()) {
+    return;
+  }
+  args.push_back("-hwaccel");
+  args.push_back(*hwaccel);
+}
+
+std::vector<std::string> resolve_ffmpeg_h264_encoders() {
+  std::vector<std::string> encoders;
+  if (const auto value = read_non_empty_env("MAICONV_FFMPEG_H264_ENCODER");
+      value.has_value()) {
+    append_unique_string(encoders, *value);
+    return encoders;
+  }
+
+  if (resolve_ffmpeg_hwaccel().has_value()) {
+    append_unique_string(encoders, "h264_nvenc");
+    append_unique_string(encoders, "h264_qsv");
+    append_unique_string(encoders, "h264_amf");
+  }
+  append_unique_string(encoders, "libx264");
+  return encoders;
+}
+
+std::vector<std::string> resolve_ffmpeg_vp9_encoders() {
+  std::vector<std::string> encoders;
+  if (const auto value = read_non_empty_env("MAICONV_FFMPEG_VP9_ENCODER");
+      value.has_value()) {
+    append_unique_string(encoders, *value);
+    return encoders;
+  }
+
+  if (resolve_ffmpeg_hwaccel().has_value()) {
+    append_unique_string(encoders, "vp9_qsv");
+  }
+  append_unique_string(encoders, "libvpx-vp9");
+  return encoders;
+}
+
+[[maybe_unused]] void append_hwaccel_arg(std::vector<std::string> &args) {
+  const auto hwaccel = resolve_ffmpeg_hwaccel();
+  if (!hwaccel.has_value()) {
+    return;
+  }
+  args.push_back("-hwaccel");
+  args.push_back(*hwaccel);
+}
+
+void remove_file_if_exists(const std::filesystem::path &path) {
+  std::error_code ec;
+  std::filesystem::remove(path, ec);
+}
+
 #if defined(_WIN32)
 std::wstring resolve_ffmpeg_executable();
+
+std::wstring widen_ascii(const std::string &value) {
+  return std::wstring(value.begin(), value.end());
+}
+
+void append_hwaccel_arg(std::vector<std::wstring> &args) {
+  const auto hwaccel = resolve_ffmpeg_hwaccel();
+  if (!hwaccel.has_value()) {
+    return;
+  }
+  args.push_back(L"-hwaccel");
+  args.push_back(widen_ascii(*hwaccel));
+}
+
+void append_audio_hwaccel_arg(std::vector<std::wstring> &args) {
+  const auto hwaccel = resolve_ffmpeg_audio_hwaccel();
+  if (!hwaccel.has_value()) {
+    return;
+  }
+  args.push_back(L"-hwaccel");
+  args.push_back(widen_ascii(*hwaccel));
+}
 
 std::wstring quote_windows_argument(const std::wstring &arg) {
   if (arg.empty()) {
@@ -320,9 +480,9 @@ std::wstring resolve_ffmpeg_executable() {
   static std::once_flag once;
   static std::wstring cached;
   std::call_once(once, []() {
-    const wchar_t *env_path = _wgetenv(L"MAICONV_FFMPEG");
-    if (env_path != nullptr && env_path[0] != L'\0') {
-      cached = env_path;
+    if (const auto env_path = read_non_empty_wenv(L"MAICONV_FFMPEG");
+        env_path.has_value()) {
+      cached = *env_path;
       return;
     }
 
@@ -538,9 +698,9 @@ std::string resolve_ffmpeg_executable() {
   static std::once_flag once;
   static std::string cached;
   std::call_once(once, []() {
-    const char *env_path = std::getenv("MAICONV_FFMPEG");
-    if (env_path != nullptr && env_path[0] != '\0') {
-      cached = env_path;
+    if (const auto env_path = read_non_empty_env("MAICONV_FFMPEG");
+        env_path.has_value()) {
+      cached = *env_path;
       return;
     }
     cached = "ffmpeg";
@@ -800,234 +960,6 @@ bool starts_with(const std::vector<uint8_t> &data,
                  const std::array<uint8_t, N> &sig) {
   return data.size() >= sig.size() &&
          std::equal(sig.begin(), sig.end(), data.begin());
-}
-
-std::optional<int> pick_supported_bitrate(int sample_rate) {
-  constexpr std::array<int, 11> kCandidates = {192, 160, 128, 112, 96, 80,
-                                               64,  56,  48,  40,  32};
-  for (const int br : kCandidates) {
-    if (shine_check_config(sample_rate, br) >= 0) {
-      return br;
-    }
-  }
-  return std::nullopt;
-}
-
-shine_t create_shine_encoder(int sample_rate, int channels,
-                             int *samples_per_pass) {
-  if (channels < 1 || channels > 2 || samples_per_pass == nullptr) {
-    return nullptr;
-  }
-
-  const auto bitrate = pick_supported_bitrate(sample_rate);
-  if (!bitrate.has_value()) {
-    return nullptr;
-  }
-
-  shine_config_t cfg{};
-  shine_set_config_mpeg_defaults(&cfg.mpeg);
-  cfg.wave.samplerate = sample_rate;
-  cfg.wave.channels = channels == 1 ? PCM_MONO : PCM_STEREO;
-  cfg.mpeg.bitr = *bitrate;
-  cfg.mpeg.mode = channels == 1 ? MONO : STEREO;
-
-  shine_t enc = shine_initialise(&cfg);
-  if (enc == nullptr) {
-    return nullptr;
-  }
-
-  *samples_per_pass = shine_samples_per_pass(enc);
-  if (*samples_per_pass <= 0) {
-    shine_close(enc);
-    return nullptr;
-  }
-
-  return enc;
-}
-
-bool decode_vgmstream_to_mp3_subsong(const std::filesystem::path &input,
-                                     int subsong,
-                                     const std::filesystem::path &target_mp3) {
-  if (!file_non_empty(input)) {
-    return false;
-  }
-
-  libstreamfile_t *sf = libstreamfile_open_from_stdio(input.string().c_str());
-  if (sf == nullptr) {
-    return false;
-  }
-
-  libvgmstream_t *lib = libvgmstream_init();
-  if (lib == nullptr) {
-    libstreamfile_close(sf);
-    return false;
-  }
-
-  libvgmstream_config_t cfg{};
-  cfg.ignore_loop = true;
-  cfg.force_sfmt = LIBVGMSTREAM_SFMT_PCM16;
-  cfg.auto_downmix_channels = 2;
-  libvgmstream_setup(lib, &cfg);
-
-  const int open_err = libvgmstream_open_stream(lib, sf, subsong);
-  libstreamfile_close(sf);
-  if (open_err < 0) {
-    libvgmstream_free(lib);
-    return false;
-  }
-
-  const int channels = lib->format != nullptr ? lib->format->channels : 0;
-  const int sample_rate = lib->format != nullptr ? lib->format->sample_rate : 0;
-  if (channels < 1 || channels > 2 || sample_rate <= 0) {
-    libvgmstream_free(lib);
-    return false;
-  }
-
-  int samples_per_pass = 0;
-  shine_t enc = create_shine_encoder(sample_rate, channels, &samples_per_pass);
-  if (enc == nullptr) {
-    libvgmstream_free(lib);
-    return false;
-  }
-
-  if (!target_mp3.parent_path().empty()) {
-    std::filesystem::create_directories(target_mp3.parent_path());
-  }
-  std::ofstream out(target_mp3, std::ios::binary | std::ios::trunc);
-  if (!out) {
-    shine_close(enc);
-    libvgmstream_free(lib);
-    return false;
-  }
-
-  std::vector<uint8_t> encoded_buffer;
-  encoded_buffer.reserve(256 * 1024);
-
-  const auto flush_encoded_buffer = [&]() {
-    if (encoded_buffer.empty()) {
-      return;
-    }
-    out.write(reinterpret_cast<const char *>(encoded_buffer.data()),
-              static_cast<std::streamsize>(encoded_buffer.size()));
-    encoded_buffer.clear();
-  };
-
-  std::vector<int16_t> pcm(static_cast<std::size_t>(samples_per_pass) *
-                               static_cast<std::size_t>(channels),
-                           0);
-
-  while (lib->decoder != nullptr && !lib->decoder->done) {
-    const int err = libvgmstream_fill(lib, pcm.data(), samples_per_pass);
-    if (err < 0) {
-      shine_close(enc);
-      libvgmstream_free(lib);
-      return false;
-    }
-
-    int written = 0;
-    unsigned char *packet =
-        shine_encode_buffer_interleaved(enc, pcm.data(), &written);
-    if (packet == nullptr || written < 0) {
-      shine_close(enc);
-      libvgmstream_free(lib);
-      return false;
-    }
-    if (written > 0) {
-      const auto begin = packet;
-      const auto end = packet + written;
-      encoded_buffer.insert(encoded_buffer.end(), begin, end);
-      if (encoded_buffer.size() >= 256 * 1024) {
-        flush_encoded_buffer();
-        if (!out.good()) {
-          shine_close(enc);
-          libvgmstream_free(lib);
-          return false;
-        }
-      }
-    }
-  }
-
-  int flushed = 0;
-  unsigned char *tail = shine_flush(enc, &flushed);
-  if (tail != nullptr && flushed > 0) {
-    const auto begin = tail;
-    const auto end = tail + flushed;
-    encoded_buffer.insert(encoded_buffer.end(), begin, end);
-  }
-
-  flush_encoded_buffer();
-  if (!out.good()) {
-    shine_close(enc);
-    libvgmstream_free(lib);
-    return false;
-  }
-
-  shine_close(enc);
-  libvgmstream_free(lib);
-
-  out.flush();
-  return out.good() && file_non_empty(target_mp3);
-}
-
-bool decode_vgmstream_to_mp3(const std::filesystem::path &input,
-                             const std::filesystem::path &target_mp3) {
-  return decode_vgmstream_to_mp3_subsong(input, 0, target_mp3);
-}
-
-std::optional<int>
-find_longest_vgmstream_subsong(const std::filesystem::path &input) {
-  if (!file_non_empty(input)) {
-    return std::nullopt;
-  }
-
-  libstreamfile_t *sf = libstreamfile_open_from_stdio(input.string().c_str());
-  if (sf == nullptr) {
-    return std::nullopt;
-  }
-
-  libvgmstream_t *lib = libvgmstream_init();
-  if (lib == nullptr) {
-    libstreamfile_close(sf);
-    return std::nullopt;
-  }
-
-  libvgmstream_config_t cfg{};
-  cfg.ignore_loop = true;
-  cfg.force_sfmt = LIBVGMSTREAM_SFMT_PCM16;
-  cfg.auto_downmix_channels = 2;
-  libvgmstream_setup(lib, &cfg);
-
-  const int open_default = libvgmstream_open_stream(lib, sf, 0);
-  if (open_default < 0 || lib->format == nullptr) {
-    libstreamfile_close(sf);
-    libvgmstream_free(lib);
-    return std::nullopt;
-  }
-
-  int subsong_count = lib->format->subsong_count;
-  if (subsong_count <= 1) {
-    libstreamfile_close(sf);
-    libvgmstream_free(lib);
-    return std::nullopt;
-  }
-
-  int best_subsong = 1;
-  int64_t best_samples = 0;
-  for (int i = 1; i <= subsong_count; ++i) {
-    if (libvgmstream_open_stream(lib, sf, i) < 0 || lib->format == nullptr) {
-      continue;
-    }
-
-    const int64_t play_samples = lib->format->play_samples;
-    if (play_samples > best_samples) {
-      best_samples = play_samples;
-      best_subsong = i;
-    }
-  }
-
-  libstreamfile_close(sf);
-  libvgmstream_free(lib);
-  return best_samples > 0 ? std::optional<int>(best_subsong) : std::nullopt;
 }
 
 bool write_embedded_png(const std::filesystem::path &source,
@@ -1367,588 +1299,6 @@ bool extract_usm_video_stream(const std::filesystem::path &source,
   return !out.data.empty();
 }
 
-#if MAICONV_HAS_LIBAV
-struct MemoryAvioState {
-  const uint8_t *data = nullptr;
-  std::size_t size = 0;
-  std::size_t offset = 0;
-};
-
-int avio_read_from_memory(void *opaque, uint8_t *buf, int buf_size) {
-  if (opaque == nullptr || buf == nullptr || buf_size <= 0) {
-    return AVERROR(EINVAL);
-  }
-  auto *state = static_cast<MemoryAvioState *>(opaque);
-  if (state->offset >= state->size) {
-    return AVERROR_EOF;
-  }
-
-  const auto remaining = state->size - state->offset;
-  const auto to_copy =
-      std::min<std::size_t>(remaining, static_cast<std::size_t>(buf_size));
-  std::memcpy(buf, state->data + static_cast<std::ptrdiff_t>(state->offset),
-              to_copy);
-  state->offset += to_copy;
-  return static_cast<int>(to_copy);
-}
-
-int64_t avio_seek_in_memory(void *opaque, int64_t offset, int whence) {
-  if (opaque == nullptr) {
-    return AVERROR(EINVAL);
-  }
-  auto *state = static_cast<MemoryAvioState *>(opaque);
-  if ((whence & AVSEEK_SIZE) != 0) {
-    return static_cast<int64_t>(state->size);
-  }
-
-  std::int64_t base = 0;
-  switch (whence) {
-  case SEEK_SET:
-    base = 0;
-    break;
-  case SEEK_CUR:
-    base = static_cast<std::int64_t>(state->offset);
-    break;
-  case SEEK_END:
-    base = static_cast<std::int64_t>(state->size);
-    break;
-  default:
-    return AVERROR(EINVAL);
-  }
-
-  const std::int64_t next = base + offset;
-  if (next < 0 || next > static_cast<std::int64_t>(state->size)) {
-    return AVERROR(EINVAL);
-  }
-  state->offset = static_cast<std::size_t>(next);
-  return next;
-}
-
-const AVCodec *find_encoder_with_fallback(const char *preferred_name,
-                                          AVCodecID codec_id) {
-  if (preferred_name != nullptr) {
-    if (const AVCodec *named = avcodec_find_encoder_by_name(preferred_name)) {
-      return named;
-    }
-  }
-  return avcodec_find_encoder(codec_id);
-}
-
-bool encoder_supports_pix_fmt(const AVCodec *encoder, AVPixelFormat pix_fmt) {
-  if (encoder == nullptr) {
-    return false;
-  }
-  if (encoder->pix_fmts == nullptr) {
-    return true;
-  }
-  for (const AVPixelFormat *it = encoder->pix_fmts; *it != AV_PIX_FMT_NONE;
-       ++it) {
-    if (*it == pix_fmt) {
-      return true;
-    }
-  }
-  return false;
-}
-
-AVRational pick_frame_rate(const AVStream *input_stream,
-                           const AVCodecContext *decoder_ctx) {
-  if (input_stream != nullptr && input_stream->avg_frame_rate.num > 0 &&
-      input_stream->avg_frame_rate.den > 0) {
-    return input_stream->avg_frame_rate;
-  }
-  if (input_stream != nullptr && input_stream->r_frame_rate.num > 0 &&
-      input_stream->r_frame_rate.den > 0) {
-    return input_stream->r_frame_rate;
-  }
-  if (decoder_ctx != nullptr && decoder_ctx->framerate.num > 0 &&
-      decoder_ctx->framerate.den > 0) {
-    return decoder_ctx->framerate;
-  }
-  return AVRational{30, 1};
-}
-
-bool open_video_decoder(AVFormatContext *input_ctx, int *video_stream_index_out,
-                        AVCodecContext **decoder_ctx_out) {
-  if (input_ctx == nullptr || video_stream_index_out == nullptr ||
-      decoder_ctx_out == nullptr) {
-    return false;
-  }
-  *video_stream_index_out = -1;
-  *decoder_ctx_out = nullptr;
-
-  const int video_stream_index =
-      av_find_best_stream(input_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-  if (video_stream_index < 0) {
-    return false;
-  }
-  AVStream *input_stream = input_ctx->streams[video_stream_index];
-  if (input_stream == nullptr || input_stream->codecpar == nullptr) {
-    return false;
-  }
-
-  const AVCodec *decoder =
-      avcodec_find_decoder(input_stream->codecpar->codec_id);
-  if (decoder == nullptr) {
-    return false;
-  }
-
-  AVCodecContext *decoder_ctx = avcodec_alloc_context3(decoder);
-  if (decoder_ctx == nullptr) {
-    return false;
-  }
-  if (avcodec_parameters_to_context(decoder_ctx, input_stream->codecpar) < 0) {
-    avcodec_free_context(&decoder_ctx);
-    return false;
-  }
-  if (avcodec_open2(decoder_ctx, decoder, nullptr) < 0) {
-    avcodec_free_context(&decoder_ctx);
-    return false;
-  }
-
-  *video_stream_index_out = video_stream_index;
-  *decoder_ctx_out = decoder_ctx;
-  return true;
-}
-
-bool open_video_encoder(const AVCodec *encoder, AVFormatContext *output_ctx,
-                        AVStream *output_stream,
-                        const AVCodecContext *decoder_ctx,
-                        AVRational source_time_base,
-                        AVCodecContext **encoder_ctx_out) {
-  if (encoder == nullptr || output_ctx == nullptr || output_stream == nullptr ||
-      decoder_ctx == nullptr || encoder_ctx_out == nullptr) {
-    return false;
-  }
-  *encoder_ctx_out = nullptr;
-
-  AVCodecContext *encoder_ctx = avcodec_alloc_context3(encoder);
-  if (encoder_ctx == nullptr) {
-    return false;
-  }
-
-  encoder_ctx->width = decoder_ctx->width;
-  encoder_ctx->height = decoder_ctx->height;
-  encoder_ctx->sample_aspect_ratio = decoder_ctx->sample_aspect_ratio;
-
-  AVPixelFormat encoder_pix_fmt = decoder_ctx->pix_fmt;
-  if (encoder_pix_fmt == AV_PIX_FMT_NONE) {
-    encoder_pix_fmt = encoder->pix_fmts != nullptr ? encoder->pix_fmts[0]
-                                                   : AV_PIX_FMT_YUV420P;
-  }
-  if (!encoder_supports_pix_fmt(encoder, encoder_pix_fmt)) {
-    if (encoder->pix_fmts == nullptr) {
-      avcodec_free_context(&encoder_ctx);
-      return false;
-    }
-    encoder_pix_fmt = encoder->pix_fmts[0];
-  }
-  encoder_ctx->pix_fmt = encoder_pix_fmt;
-
-  const AVRational frame_rate = pick_frame_rate(nullptr, decoder_ctx);
-  encoder_ctx->framerate = frame_rate;
-  encoder_ctx->time_base = av_inv_q(frame_rate);
-  if (encoder_ctx->time_base.num <= 0 || encoder_ctx->time_base.den <= 0) {
-    encoder_ctx->time_base = source_time_base;
-  }
-  if (encoder_ctx->time_base.num <= 0 || encoder_ctx->time_base.den <= 0) {
-    encoder_ctx->time_base = AVRational{1, 30};
-  }
-
-  encoder_ctx->bit_rate =
-      decoder_ctx->bit_rate > 0 ? decoder_ctx->bit_rate : 2'000'000;
-  if ((output_ctx->oformat->flags & AVFMT_GLOBALHEADER) != 0) {
-    encoder_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-  }
-
-  if (avcodec_open2(encoder_ctx, encoder, nullptr) < 0) {
-    avcodec_free_context(&encoder_ctx);
-    return false;
-  }
-  if (avcodec_parameters_from_context(output_stream->codecpar, encoder_ctx) <
-      0) {
-    avcodec_free_context(&encoder_ctx);
-    return false;
-  }
-  output_stream->time_base = encoder_ctx->time_base;
-  *encoder_ctx_out = encoder_ctx;
-  return true;
-}
-
-bool transcode_video_stream(AVFormatContext *input_ctx, int video_stream_index,
-                            AVCodecContext *decoder_ctx,
-                            AVFormatContext *output_ctx,
-                            AVCodecContext *encoder_ctx,
-                            AVStream *output_stream) {
-  if (input_ctx == nullptr || video_stream_index < 0 ||
-      decoder_ctx == nullptr || output_ctx == nullptr ||
-      encoder_ctx == nullptr || output_stream == nullptr) {
-    return false;
-  }
-
-  AVPacket *input_packet = av_packet_alloc();
-  AVPacket *output_packet = av_packet_alloc();
-  AVFrame *frame = av_frame_alloc();
-  if (input_packet == nullptr || output_packet == nullptr || frame == nullptr) {
-    if (input_packet != nullptr) {
-      av_packet_free(&input_packet);
-    }
-    if (output_packet != nullptr) {
-      av_packet_free(&output_packet);
-    }
-    if (frame != nullptr) {
-      av_frame_free(&frame);
-    }
-    return false;
-  }
-
-  const AVRational source_time_base =
-      input_ctx->streams[video_stream_index]->time_base;
-  int64_t next_pts = 0;
-  bool success = true;
-
-  const auto encode_frame = [&](AVFrame *input_frame) -> bool {
-    AVFrame *frame_to_send = input_frame;
-    if (frame_to_send != nullptr) {
-      if (frame_to_send->format != encoder_ctx->pix_fmt ||
-          frame_to_send->width != encoder_ctx->width ||
-          frame_to_send->height != encoder_ctx->height) {
-        return false;
-      }
-
-      int64_t pts = frame_to_send->best_effort_timestamp;
-      if (pts == AV_NOPTS_VALUE) {
-        pts = frame_to_send->pts;
-      }
-      if (pts == AV_NOPTS_VALUE) {
-        frame_to_send->pts = next_pts++;
-      } else {
-        frame_to_send->pts =
-            av_rescale_q(pts, source_time_base, encoder_ctx->time_base);
-        next_pts = frame_to_send->pts + 1;
-      }
-    }
-
-    int rc = avcodec_send_frame(encoder_ctx, frame_to_send);
-    if (rc < 0) {
-      return false;
-    }
-
-    while (true) {
-      rc = avcodec_receive_packet(encoder_ctx, output_packet);
-      if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF) {
-        break;
-      }
-      if (rc < 0) {
-        return false;
-      }
-
-      av_packet_rescale_ts(output_packet, encoder_ctx->time_base,
-                           output_stream->time_base);
-      output_packet->stream_index = output_stream->index;
-      if (av_interleaved_write_frame(output_ctx, output_packet) < 0) {
-        av_packet_unref(output_packet);
-        return false;
-      }
-      av_packet_unref(output_packet);
-    }
-    return true;
-  };
-
-  while (success) {
-    const int read_rc = av_read_frame(input_ctx, input_packet);
-    if (read_rc == AVERROR_EOF) {
-      break;
-    }
-    if (read_rc < 0) {
-      success = false;
-      break;
-    }
-    if (input_packet->stream_index != video_stream_index) {
-      av_packet_unref(input_packet);
-      continue;
-    }
-
-    int rc = avcodec_send_packet(decoder_ctx, input_packet);
-    av_packet_unref(input_packet);
-    if (rc < 0) {
-      success = false;
-      break;
-    }
-
-    while (true) {
-      rc = avcodec_receive_frame(decoder_ctx, frame);
-      if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF) {
-        break;
-      }
-      if (rc < 0 || !encode_frame(frame)) {
-        success = false;
-        break;
-      }
-      av_frame_unref(frame);
-    }
-  }
-
-  if (success) {
-    int rc = avcodec_send_packet(decoder_ctx, nullptr);
-    if (rc < 0) {
-      success = false;
-    }
-    while (success) {
-      rc = avcodec_receive_frame(decoder_ctx, frame);
-      if (rc == AVERROR(EAGAIN) || rc == AVERROR_EOF) {
-        break;
-      }
-      if (rc < 0 || !encode_frame(frame)) {
-        success = false;
-        break;
-      }
-      av_frame_unref(frame);
-    }
-  }
-
-  if (success && !encode_frame(nullptr)) {
-    success = false;
-  }
-
-  av_frame_free(&frame);
-  av_packet_free(&output_packet);
-  av_packet_free(&input_packet);
-  return success;
-}
-
-bool transcode_mp4_to_vp9_ivf_libav(const std::filesystem::path &source_mp4,
-                                    std::vector<uint8_t> &target_ivf) {
-  target_ivf.clear();
-  const std::string source_mp4_utf8 = path_to_utf8(source_mp4);
-  AVFormatContext *input_ctx = nullptr;
-  AVFormatContext *output_ctx = nullptr;
-  AVCodecContext *decoder_ctx = nullptr;
-  AVCodecContext *encoder_ctx = nullptr;
-  AVStream *output_stream = nullptr;
-  AVStream *input_stream = nullptr;
-  const AVCodec *encoder = nullptr;
-  int video_stream_index = -1;
-  uint8_t *dyn_buffer = nullptr;
-  bool success = false;
-
-  if (avformat_open_input(&input_ctx, source_mp4_utf8.c_str(), nullptr,
-                          nullptr) < 0 ||
-      avformat_find_stream_info(input_ctx, nullptr) < 0) {
-    goto cleanup;
-  }
-
-  if (!open_video_decoder(input_ctx, &video_stream_index, &decoder_ctx)) {
-    goto cleanup;
-  }
-  input_stream = input_ctx->streams[video_stream_index];
-  if (input_stream == nullptr) {
-    goto cleanup;
-  }
-
-  if (avformat_alloc_output_context2(&output_ctx, nullptr, "ivf", nullptr) <
-          0 ||
-      output_ctx == nullptr) {
-    goto cleanup;
-  }
-  if (avio_open_dyn_buf(&output_ctx->pb) < 0) {
-    goto cleanup;
-  }
-
-  encoder = find_encoder_with_fallback("libvpx-vp9", AV_CODEC_ID_VP9);
-  if (encoder == nullptr) {
-    goto cleanup;
-  }
-
-  output_stream = avformat_new_stream(output_ctx, nullptr);
-  if (output_stream == nullptr) {
-    goto cleanup;
-  }
-
-  if (!open_video_encoder(encoder, output_ctx, output_stream, decoder_ctx,
-                          input_stream->time_base, &encoder_ctx)) {
-    goto cleanup;
-  }
-
-  if (avformat_write_header(output_ctx, nullptr) < 0) {
-    goto cleanup;
-  }
-  if (!transcode_video_stream(input_ctx, video_stream_index, decoder_ctx,
-                              output_ctx, encoder_ctx, output_stream)) {
-    goto cleanup;
-  }
-  if (av_write_trailer(output_ctx) < 0) {
-    goto cleanup;
-  }
-
-  {
-    const int dyn_size = avio_close_dyn_buf(output_ctx->pb, &dyn_buffer);
-    output_ctx->pb = nullptr;
-    if (dyn_size <= 0 || dyn_buffer == nullptr) {
-      goto cleanup;
-    }
-    target_ivf.assign(dyn_buffer, dyn_buffer + dyn_size);
-    av_free(dyn_buffer);
-    dyn_buffer = nullptr;
-  }
-
-  success = is_vp9_ivf_stream(target_ivf);
-
-cleanup:
-  if (dyn_buffer != nullptr) {
-    av_free(dyn_buffer);
-  }
-  if (encoder_ctx != nullptr) {
-    avcodec_free_context(&encoder_ctx);
-  }
-  if (decoder_ctx != nullptr) {
-    avcodec_free_context(&decoder_ctx);
-  }
-  if (output_ctx != nullptr) {
-    if (output_ctx->pb != nullptr) {
-      uint8_t *throwaway = nullptr;
-      const int throwaway_size = avio_close_dyn_buf(output_ctx->pb, &throwaway);
-      output_ctx->pb = nullptr;
-      if (throwaway_size > 0 && throwaway != nullptr) {
-        av_free(throwaway);
-      }
-    }
-    avformat_free_context(output_ctx);
-  }
-  if (input_ctx != nullptr) {
-    avformat_close_input(&input_ctx);
-  }
-  return success;
-}
-
-bool transcode_vp9_ivf_to_h264_mp4_libav(
-    const std::vector<uint8_t> &source_ivf,
-    const std::filesystem::path &target_mp4) {
-  if (source_ivf.empty()) {
-    return false;
-  }
-  const std::string target_mp4_utf8 = path_to_utf8(target_mp4);
-
-  AVFormatContext *input_ctx = avformat_alloc_context();
-  AVFormatContext *output_ctx = nullptr;
-  AVCodecContext *decoder_ctx = nullptr;
-  AVCodecContext *encoder_ctx = nullptr;
-  AVIOContext *input_avio = nullptr;
-  unsigned char *input_avio_buffer = nullptr;
-  MemoryAvioState memory_state{};
-  AVStream *output_stream = nullptr;
-  AVStream *input_stream = nullptr;
-  const AVCodec *encoder = nullptr;
-  const AVInputFormat *ivf_input = nullptr;
-  int video_stream_index = -1;
-  bool success = false;
-
-  if (input_ctx == nullptr) {
-    goto cleanup;
-  }
-
-  memory_state.data = source_ivf.data();
-  memory_state.size = source_ivf.size();
-  memory_state.offset = 0;
-
-  input_avio_buffer = static_cast<unsigned char *>(av_malloc(32 * 1024));
-  if (input_avio_buffer == nullptr) {
-    goto cleanup;
-  }
-  input_avio =
-      avio_alloc_context(input_avio_buffer, 32 * 1024, 0, &memory_state,
-                         &avio_read_from_memory, nullptr, &avio_seek_in_memory);
-  if (input_avio == nullptr) {
-    goto cleanup;
-  }
-  input_ctx->pb = input_avio;
-  input_ctx->flags |= AVFMT_FLAG_CUSTOM_IO;
-
-  ivf_input = av_find_input_format("ivf");
-  if (avformat_open_input(&input_ctx, nullptr, ivf_input, nullptr) < 0 ||
-      avformat_find_stream_info(input_ctx, nullptr) < 0) {
-    goto cleanup;
-  }
-
-  if (!open_video_decoder(input_ctx, &video_stream_index, &decoder_ctx)) {
-    goto cleanup;
-  }
-  input_stream = input_ctx->streams[video_stream_index];
-  if (input_stream == nullptr) {
-    goto cleanup;
-  }
-
-  if (!target_mp4.parent_path().empty()) {
-    std::filesystem::create_directories(target_mp4.parent_path());
-  }
-  if (avformat_alloc_output_context2(&output_ctx, nullptr, nullptr,
-                                     target_mp4_utf8.c_str()) < 0 ||
-      output_ctx == nullptr) {
-    goto cleanup;
-  }
-
-  encoder = find_encoder_with_fallback("libx264", AV_CODEC_ID_H264);
-  if (encoder == nullptr) {
-    goto cleanup;
-  }
-
-  output_stream = avformat_new_stream(output_ctx, nullptr);
-  if (output_stream == nullptr) {
-    goto cleanup;
-  }
-
-  if (!open_video_encoder(encoder, output_ctx, output_stream, decoder_ctx,
-                          input_stream->time_base, &encoder_ctx)) {
-    goto cleanup;
-  }
-
-  if (!(output_ctx->oformat->flags & AVFMT_NOFILE)) {
-    if (avio_open(&output_ctx->pb, target_mp4_utf8.c_str(), AVIO_FLAG_WRITE) <
-        0) {
-      goto cleanup;
-    }
-  }
-
-  if (avformat_write_header(output_ctx, nullptr) < 0) {
-    goto cleanup;
-  }
-  if (!transcode_video_stream(input_ctx, video_stream_index, decoder_ctx,
-                              output_ctx, encoder_ctx, output_stream)) {
-    goto cleanup;
-  }
-  if (av_write_trailer(output_ctx) < 0) {
-    goto cleanup;
-  }
-
-  success = file_non_empty(target_mp4);
-
-cleanup:
-  if (encoder_ctx != nullptr) {
-    avcodec_free_context(&encoder_ctx);
-  }
-  if (decoder_ctx != nullptr) {
-    avcodec_free_context(&decoder_ctx);
-  }
-  if (output_ctx != nullptr) {
-    if (output_ctx->pb != nullptr &&
-        !(output_ctx->oformat->flags & AVFMT_NOFILE)) {
-      avio_closep(&output_ctx->pb);
-    }
-    avformat_free_context(output_ctx);
-  }
-  if (input_ctx != nullptr) {
-    avformat_close_input(&input_ctx);
-  }
-  if (input_avio != nullptr) {
-    if (input_avio->buffer != nullptr) {
-      av_free(input_avio->buffer);
-      input_avio->buffer = nullptr;
-    }
-    avio_context_free(&input_avio);
-  }
-  return success;
-}
-#endif
-
 bool fallback_ffmpeg_vp9_to_h264(const std::vector<uint8_t> &vp9_ivf,
                                  const std::filesystem::path &target_mp4) {
   if (vp9_ivf.empty()) {
@@ -1959,25 +1309,34 @@ bool fallback_ffmpeg_vp9_to_h264(const std::vector<uint8_t> &vp9_ivf,
     std::filesystem::create_directories(target_mp4.parent_path());
   }
 
-#if MAICONV_HAS_LIBAV
-  if (transcode_vp9_ivf_to_h264_mp4_libav(vp9_ivf, target_mp4)) {
-    return true;
+  const auto h264_encoders = resolve_ffmpeg_h264_encoders();
+  if (h264_encoders.empty()) {
+    return false;
   }
-#endif
 
+  for (const auto &encoder : h264_encoders) {
+    remove_file_if_exists(target_mp4);
 #if defined(_WIN32)
-  const bool ok = run_ffmpeg_feed_stdin(
-      {L"-y", L"-loglevel", L"error", L"-f", L"ivf", L"-i", L"pipe:0", L"-an",
-       L"-c:v", L"libx264", L"-pix_fmt", L"yuv420p", target_mp4.wstring()},
-      vp9_ivf);
+    std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(), {L"-f", L"ivf", L"-i", L"pipe:0", L"-an", L"-c:v",
+                             widen_ascii(encoder), L"-pix_fmt", L"yuv420p",
+                             target_mp4.wstring()});
+    const bool ok = run_ffmpeg_feed_stdin(args, vp9_ivf);
 #else
-  const bool ok = run_ffmpeg_feed_stdin(
-      {"-y", "-loglevel", "error", "-f", "ivf", "-i", "pipe:0", "-an", "-c:v",
-       "libx264", "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)},
-      vp9_ivf);
+    std::vector<std::string> args = {"-y", "-loglevel", "error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(),
+                {"-f", "ivf", "-i", "pipe:0", "-an", "-c:v", encoder,
+                 "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
+    const bool ok = run_ffmpeg_feed_stdin(args, vp9_ivf);
 #endif
+    if (ok && file_non_empty(target_mp4)) {
+      return true;
+    }
+  }
 
-  return ok && file_non_empty(target_mp4);
+  return false;
 }
 
 bool transcode_mp4_to_vp9_ivf_bytes(const std::filesystem::path &source_mp4,
@@ -1988,25 +1347,33 @@ bool transcode_mp4_to_vp9_ivf_bytes(const std::filesystem::path &source_mp4,
 
   target_ivf.clear();
 
-#if MAICONV_HAS_LIBAV
-  if (transcode_mp4_to_vp9_ivf_libav(source_mp4, target_ivf) &&
-      is_vp9_ivf_stream(target_ivf)) {
-    return true;
+  const auto vp9_encoders = resolve_ffmpeg_vp9_encoders();
+  if (vp9_encoders.empty()) {
+    return false;
   }
-#endif
 
+  for (const auto &encoder : vp9_encoders) {
+    target_ivf.clear();
 #if defined(_WIN32)
-  const bool ok = run_ffmpeg_capture_stdout(
-      {L"-y", L"-loglevel", L"error", L"-i", source_mp4.wstring(), L"-an",
-       L"-c:v", L"libvpx-vp9", L"-f", L"ivf", L"pipe:1"},
-      target_ivf);
+    std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(), {L"-i", source_mp4.wstring(), L"-an", L"-c:v",
+                             widen_ascii(encoder), L"-f", L"ivf", L"pipe:1"});
+    const bool ok = run_ffmpeg_capture_stdout(args, target_ivf);
 #else
-  const bool ok = run_ffmpeg_capture_stdout(
-      {"-y", "-loglevel", "error", "-i", path_to_utf8(source_mp4), "-an",
-       "-c:v", "libvpx-vp9", "-f", "ivf", "pipe:1"},
-      target_ivf);
+    std::vector<std::string> args = {"-y", "-loglevel", "error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(), {"-i", path_to_utf8(source_mp4), "-an", "-c:v",
+                             encoder, "-f", "ivf", "pipe:1"});
+    const bool ok = run_ffmpeg_capture_stdout(args, target_ivf);
 #endif
-  return ok && is_vp9_ivf_stream(target_ivf);
+    if (ok && is_vp9_ivf_stream(target_ivf)) {
+      return true;
+    }
+  }
+
+  target_ivf.clear();
+  return false;
 }
 
 bool read_binary_file(const std::filesystem::path &path,
@@ -2248,6 +1615,34 @@ bool convert_usm_to_mp4(const std::filesystem::path &source,
 
   return transcode_vp9_ivf_to_h264_mp4(stream.data, target_mp4);
 }
+
+bool transcode_audio_to_mp3_ffmpeg(const std::filesystem::path &source,
+                                   const std::filesystem::path &target_mp3) {
+  if (!file_non_empty(source)) {
+    return false;
+  }
+  if (!target_mp3.parent_path().empty()) {
+    std::filesystem::create_directories(target_mp3.parent_path());
+  }
+
+#if defined(_WIN32)
+  std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+  append_audio_hwaccel_arg(args);
+  args.insert(args.end(), {L"-i", source.wstring(), L"-vn", L"-c:a",
+                           widen_ascii(resolve_ffmpeg_mp3_encoder()),
+                           target_mp3.wstring()});
+  const bool ok = run_ffmpeg_process(args);
+#else
+  std::vector<std::string> args = {"-y", "-loglevel", "error"};
+  append_audio_hwaccel_arg(args);
+  args.insert(args.end(),
+              {"-i", path_to_utf8(source), "-vn", "-c:a",
+               resolve_ffmpeg_mp3_encoder(), path_to_utf8(target_mp3)});
+  const bool ok = run_ffmpeg_process(args);
+#endif
+
+  return ok && file_non_empty(target_mp3);
+}
 } // namespace
 
 bool convert_audio_to_mp3(const std::filesystem::path &source,
@@ -2266,7 +1661,7 @@ bool convert_audio_to_mp3(const std::filesystem::path &source,
     return file_non_empty(target_mp3);
   }
 
-  return decode_vgmstream_to_mp3(source, target_mp3);
+  return transcode_audio_to_mp3_ffmpeg(source, target_mp3);
 }
 
 bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
@@ -2278,13 +1673,14 @@ bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
 
   const auto tmp_dir = make_temp_work_dir();
   std::filesystem::path decode_acb = acb;
+  std::filesystem::path decode_awb = awb;
 
   const bool same_parent = acb.parent_path() == awb.parent_path();
   const bool same_stem =
       lower(acb.stem().string()) == lower(awb.stem().string());
   if (!same_parent || !same_stem) {
     decode_acb = tmp_dir / acb.filename();
-    const auto staged_awb = tmp_dir / awb.filename();
+    decode_awb = tmp_dir / awb.filename();
 
     std::error_code copy_ec;
     std::filesystem::copy_file(
@@ -2295,7 +1691,7 @@ bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
     }
 
     std::filesystem::copy_file(
-        awb, staged_awb, std::filesystem::copy_options::overwrite_existing,
+        awb, decode_awb, std::filesystem::copy_options::overwrite_existing,
         copy_ec);
     if (copy_ec) {
       return false;
@@ -2304,13 +1700,14 @@ bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
     const auto expected_awb =
         decode_acb.parent_path() / (decode_acb.stem().string() + ".awb");
     if (lower(expected_awb.filename().string()) !=
-        lower(staged_awb.filename().string())) {
+        lower(decode_awb.filename().string())) {
       std::filesystem::copy_file(
-          staged_awb, expected_awb,
+          decode_awb, expected_awb,
           std::filesystem::copy_options::overwrite_existing, copy_ec);
       if (copy_ec) {
         return false;
       }
+      decode_awb = expected_awb;
     }
   }
 
@@ -2336,28 +1733,11 @@ bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
     }
   }
 
-  // Some charts use ACB mainly as metadata while payload is in AWB.
-  // Fall back to decoding AWB directly when ACB open/decode fails.
-  bool ok = decode_vgmstream_to_mp3(decode_acb, target_mp3);
-  if (!ok) {
-    std::filesystem::path decode_awb = awb;
-    if (!same_parent || !same_stem) {
-      decode_awb = tmp_dir / awb.filename();
-    }
-    ok = decode_vgmstream_to_mp3(decode_awb, target_mp3);
-
-    // XV2-style idea: containers may have multiple cues/entries;
-    // if default stream fails, pick the longest subsong as a robust fallback.
-    if (!ok) {
-      const auto longest_subsong = find_longest_vgmstream_subsong(decode_awb);
-      if (longest_subsong.has_value()) {
-        ok = decode_vgmstream_to_mp3_subsong(decode_awb, *longest_subsong,
-                                             target_mp3);
-      }
-    }
+  if (transcode_audio_to_mp3_ffmpeg(decode_acb, target_mp3)) {
+    return true;
   }
 
-  return ok;
+  return transcode_audio_to_mp3_ffmpeg(decode_awb, target_mp3);
 }
 
 bool convert_mp3_to_acb_awb(const std::filesystem::path &source_mp3,
@@ -2428,16 +1808,33 @@ bool convert_dat_or_usm_to_mp4(const std::filesystem::path &source,
     return true;
   }
 
+  const auto h264_encoders = resolve_ffmpeg_h264_encoders();
+  if (h264_encoders.empty()) {
+    return false;
+  }
+
+  for (const auto &encoder : h264_encoders) {
+    remove_file_if_exists(target_mp4);
 #if defined(_WIN32)
-  const bool fallback_ok = run_ffmpeg_process(
-      {L"-y", L"-loglevel", L"error", L"-i", source.wstring(), L"-an", L"-c:v",
-       L"libx264", L"-pix_fmt", L"yuv420p", target_mp4.wstring()});
+    std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(),
+                {L"-i", source.wstring(), L"-an", L"-c:v", widen_ascii(encoder),
+                 L"-pix_fmt", L"yuv420p", target_mp4.wstring()});
+    const bool fallback_ok = run_ffmpeg_process(args);
 #else
-  const bool fallback_ok = run_ffmpeg_process(
-      {"-y", "-loglevel", "error", "-i", path_to_utf8(source), "-an", "-c:v",
-       "libx264", "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
+    std::vector<std::string> args = {"-y", "-loglevel", "error"};
+    append_hwaccel_arg(args);
+    args.insert(args.end(), {"-i", path_to_utf8(source), "-an", "-c:v", encoder,
+                             "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
+    const bool fallback_ok = run_ffmpeg_process(args);
 #endif
-  return fallback_ok && file_non_empty(target_mp4);
+    if (fallback_ok && file_non_empty(target_mp4)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool convert_mp4_to_dat(const std::filesystem::path &source_mp4,

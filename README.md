@@ -2,30 +2,29 @@
 
 [CN](./README_CN.md) | EN
 
-Cross-platform C++ reimplementation of [MaichartConverter](https://github.com/Neskol/MaichartConverter).
+Cross-platform C++ reimplementation and enhancement of [MaichartConverter](https://github.com/Neskol/MaichartConverter).
 
 ## TODO
 
-- [ ] Implement local lz4 decompression in replacement of Unity's LZ4 library (currently used via UABE code, which is only used for ACB+AWB decoding and is not performance-critical)
+- [ ] Implement local lz4 decompression in replacement of Unity LZ4 library (currently used via UABE code paths and is not performance-critical)
 - [ ] Add png/mp3/mp4 -> ab/awb+acb/dat asset export
 
 ## Features
 
-- C++20 + CMake + git submodule (runtime deps in third_party, Catch2 via FetchContent for tests)
+- C++20 + CMake + git submodule (runtime deps in third_party)
 - CLI subcommands:
   - `maiconv ma2`
   - `maiconv simai`
   - `maiconv assets`
   - `maiconv media`
-- Core pipeline: Tokenizer -> Parser -> Chart(AST) -> Composer
 - Note transforms: rotate + tick shift
-- Three-platform CI: Windows / Linux / macOS
+- Cross-platform: Windows / Linux / macOS
 
 ## Dependency Layout
 
 - `third_party/*`: runtime third-party dependencies are managed by git submodules.
-- Test dependency `Catch2` is fetched by CMake FetchContent when `MAICONV_BUILD_TESTS=ON`.
-- Current submodules: `CLI11`, `tinyxml2`, `vgmstream`, `shine`.
+- Test dependency `Catch2` is also managed as a git submodule when `MAICONV_BUILD_TESTS=ON`.
+- Required build submodules: `CLI11`, `tinyxml2` (plus `Catch2` when tests are enabled).
 
 ## Build
 
@@ -38,32 +37,36 @@ ctest --preset default
 
 ## FFmpeg Dependency Details
 
-Video-related `maiconv media` features now support two backends:
-- In-process `libav` backend (preferred): enabled when `MAICONV_ENABLE_LIBAV_TRANSCODE=ON` and FFmpeg development libraries are detected at configure time.
-- External `ffmpeg` backend (fallback): used when in-process `libav` is unavailable.
+Video-related `maiconv media` features use external `ffmpeg` only.
 
 Default build behavior:
-- `MAICONV_ENABLE_LIBAV_TRANSCODE=ON` (auto-detect).
-- If detection fails, MaiConv falls back to external `ffmpeg` and still works.
+- no in-process `libav` backend is compiled.
 
 Build examples:
 
 ```bash
-# default (auto-detect in-process libav)
+# default
 cmake --preset default
-
-# force fallback backend (no in-process libav)
-cmake --preset nolibav
-# or: cmake -S . -B build/nolibav -G Ninja -DMAICONV_ENABLE_LIBAV_TRANSCODE=OFF
 ```
 
-External `ffmpeg` executable requirements (fallback backend):
+External `ffmpeg` executable requirements:
 - `ffmpeg` should be available in `PATH`, or set `MAICONV_FFMPEG` to an absolute executable path.
 - `ffprobe` is optional (useful for manual diagnostics).
 
 Required capabilities by feature:
 - `dat/usm -> mp4`: requires `libx264` encoder (MaiConv transcodes VP9 IVF into H.264 MP4)
 - `mp4 -> dat` (both template and template-free paths): requires `libvpx-vp9` encoder (MaiConv first transcodes to VP9 IVF)
+
+Optional ffmpeg tuning settings (when your ffmpeg build supports them):
+- `MAICONV_FFMPEG_HWACCEL`: e.g. `auto`, `cuda`, `d3d11va`, `qsv`
+- `MAICONV_FFMPEG_H264_ENCODER`: e.g. `h264_nvenc`, `h264_qsv`, `h264_amf`, `libx264`
+- `MAICONV_FFMPEG_VP9_ENCODER`: e.g. `vp9_qsv`, `libvpx-vp9`
+- `MAICONV_FFMPEG_AUDIO_HWACCEL`: audio ffmpeg path hwaccel hint (same values as above)
+- `MAICONV_FFMPEG_MP3_ENCODER`: mp3 encoder for ffmpeg path (default `libmp3lame`)
+
+Notes:
+- Audio decode -> mp3 now always routes through ffmpeg; hwaccel hints are best-effort and real gains still depend on codec/driver support.
+- `mp4 -> dat` often still depends on VP9 encode throughput; GPU benefit depends on whether your ffmpeg provides a VP9 hardware encoder.
 
 Quick checks (Windows PowerShell):
 
@@ -211,15 +214,15 @@ For assets export, each song folder always contains `maidata.txt`, and media fil
 ```
 
 When source media is in original game formats, `assets` converts them as follows:
-- `acb + awb -> track.mp3` (built-in `libvgmstream` + `shine`)
+- `acb + awb -> track.mp3` (always transcoded by external `ffmpeg`)
 - `ab -> bg.png` (embedded PNG extraction)
 - `dat/usm -> pv.mp4`
-  - VP9-only path; VP9->H.264 transcode via in-process `libav` when available, otherwise external `ffmpeg`
+  - VP9-only path; VP9->H.264 transcode uses external `ffmpeg`
 - `mp4 + template(dat/usm) -> pv.dat`
-  - transcodes to VP9 IVF first (in-process `libav` or external `ffmpeg` fallback), then writes back into template DAT/USM packet layout using inverse encryption
+  - transcodes to VP9 IVF first (external `ffmpeg`), then writes back into template DAT/USM packet layout using inverse encryption
 - `mp4 -> pv.dat` (template-free)
-  - transcodes to VP9 IVF first (in-process `libav` or external `ffmpeg` fallback), then uses MaiConv's built-in C++ packer to emit DAT (`@SFV` packets + compatible encryption)
-  - fallback mode requires external `ffmpeg` with `libvpx-vp9` encoder support
+  - transcodes to VP9 IVF first (external `ffmpeg`), then uses MaiConv's built-in C++ packer to emit DAT (`@SFV` packets + compatible encryption)
+  - requires external `ffmpeg` with `libvpx-vp9` encoder support
 
 If conversion fails, raw assets are **not** preserved. The song is marked as `_Incomplete` (or the command fails without `--ignore`), and failed source/target paths are written to `_log.txt`.
 

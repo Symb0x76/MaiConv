@@ -6,6 +6,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -33,6 +34,46 @@ resolve_binary_output_path(const std::string &output,
     return std::filesystem::current_path() / default_file_name;
   }
   return resolve_output_path(output, default_file_name);
+}
+
+bool has_non_empty_env(const char *name) {
+#if defined(_WIN32)
+  char *value = nullptr;
+  std::size_t value_len = 0;
+  const errno_t rc = _dupenv_s(&value, &value_len, name);
+  if (rc != 0 || value == nullptr) {
+    if (value != nullptr) {
+      std::free(value);
+    }
+    return false;
+  }
+  const bool non_empty = value[0] != '\0';
+  std::free(value);
+  return non_empty;
+#else
+  const char *value = std::getenv(name);
+  return value != nullptr && value[0] != '\0';
+#endif
+}
+
+void set_process_env(const char *name, const char *value) {
+#if defined(_WIN32)
+  _putenv_s(name, value);
+#else
+  setenv(name, value, 1);
+#endif
+}
+
+void set_env_if_missing(const char *name, const char *value) {
+  if (!has_non_empty_env(name)) {
+    set_process_env(name, value);
+  }
+}
+
+void enable_ffmpeg_gpu_mode() {
+  set_process_env("MAICONV_FFMPEG_GPU", "1");
+  set_env_if_missing("MAICONV_FFMPEG_HWACCEL", "auto");
+  set_env_if_missing("MAICONV_FFMPEG_AUDIO_HWACCEL", "auto");
 }
 
 void write_or_stdout(const std::string &output,
@@ -282,10 +323,9 @@ int run_media_video_to_dat(const std::filesystem::path &input_mp4,
   try {
     const auto target = resolve_binary_output_path(output, "pv.dat");
     if (!maiconv::convert_mp4_to_dat(input_mp4, target)) {
-      throw std::runtime_error("Video conversion failed: " +
-                               input_mp4.string() + " -> " + target.string() +
-                               " (requires either in-process libav support or "
-                               "ffmpeg with VP9 encoder in PATH)");
+      throw std::runtime_error(
+          "Video conversion failed: " + input_mp4.string() + " -> " +
+          target.string() + " (requires ffmpeg with VP9 encoder in PATH)");
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
@@ -431,6 +471,7 @@ int main(int argc, char **argv) {
   bool assets_json = false;
   bool assets_zip = false;
   bool assets_collection = false;
+  bool assets_gpu = false;
   int assets_jobs = 1;
   bool assets_timing = false;
   std::string assets_log_level_str = "normal";
@@ -477,6 +518,9 @@ int main(int argc, char **argv) {
   assets_cmd->add_flag("--zip", assets_zip, "Zip output folders");
   assets_cmd->add_flag("--collection", assets_collection,
                        "Write collection manifests");
+  assets_cmd->add_flag(
+      "--gpu", assets_gpu,
+      "Enable automatic ffmpeg GPU acceleration hints and encoder fallback");
   assets_cmd
       ->add_option("--jobs", assets_jobs,
                    "Worker count for track-level parallel export")
@@ -486,6 +530,10 @@ int main(int argc, char **argv) {
   assets_cmd->add_option("--verbosity,--log-level", assets_log_level_str,
                          "Console output level: quiet|normal|verbose");
   assets_cmd->callback([&]() {
+    if (assets_gpu) {
+      enable_ffmpeg_gpu_mode();
+    }
+
     const auto fmt = maiconv::parse_chart_format(assets_format_str);
     if (!fmt.has_value()) {
       throw CLI::ValidationError("--format",
@@ -560,6 +608,8 @@ int main(int argc, char **argv) {
   std::string media_video_input;
   std::string media_video_output;
   std::string media_video_template;
+  bool media_audio_gpu = false;
+  bool media_video_gpu = false;
 
   auto *media_cmd =
       app.add_subcommand("media", "Standalone media transcode commands");
@@ -579,7 +629,14 @@ int main(int argc, char **argv) {
   media_audio_cmd->add_option("--output-awb", media_audio_output_awb,
                               "Output .awb file or directory (only for .mp3 "
                               "input; default: same stem as --output)");
+  media_audio_cmd->add_flag(
+      "--gpu", media_audio_gpu,
+      "Enable automatic ffmpeg GPU acceleration hints and encoder fallback");
   media_audio_cmd->callback([&]() {
+    if (media_audio_gpu) {
+      enable_ffmpeg_gpu_mode();
+    }
+
     const bool has_input = !media_audio_input.empty();
     const bool has_acb = !media_audio_acb.empty();
     const bool has_awb = !media_audio_awb.empty();
@@ -694,7 +751,14 @@ int main(int argc, char **argv) {
   media_video_cmd->add_option("--output", media_video_output,
                               "Output file or directory (default: based on "
                               "direction: ./pv.mp4 or ./pv.dat)");
+  media_video_cmd->add_flag(
+      "--gpu", media_video_gpu,
+      "Enable automatic ffmpeg GPU acceleration hints and encoder fallback");
   media_video_cmd->callback([&]() {
+    if (media_video_gpu) {
+      enable_ffmpeg_gpu_mode();
+    }
+
     const auto ext = maiconv::lower(
         std::filesystem::path(media_video_input).extension().string());
     if (ext == ".dat" || ext == ".usm") {

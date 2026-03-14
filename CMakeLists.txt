@@ -5,9 +5,6 @@ option(MAICONV_ENABLE_ASAN "Enable address sanitizer" OFF)
 option(MAICONV_ENABLE_UBSAN "Enable undefined behavior sanitizer" OFF)
 option(MAICONV_BUILD_TESTS "Build tests" ON)
 option(MAICONV_USE_CCACHE "Auto-detect and use ccache compiler launcher" ON)
-option(MAICONV_ENABLE_LIBAV_TRANSCODE "Enable in-process libav video transcode path when FFmpeg dev libs are available" ON)
-
-include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -80,7 +77,9 @@ endfunction()
 
 maiconv_ensure_submodule("third_party/CLI11" "third_party/CLI11/CMakeLists.txt")
 maiconv_ensure_submodule("third_party/tinyxml2" "third_party/tinyxml2/CMakeLists.txt")
-maiconv_ensure_submodule("third_party/shine" "third_party/shine/src/lib/layer3.h")
+if(MAICONV_BUILD_TESTS)
+    maiconv_ensure_submodule("third_party/Catch2" "third_party/Catch2/CMakeLists.txt")
+endif()
 
 set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 
@@ -91,71 +90,11 @@ if(MAICONV_BUILD_TESTS)
     set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
     set(CATCH_INSTALL_EXTRAS ON CACHE BOOL "" FORCE)
     set(CATCH_DEVELOPMENT_BUILD OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-        catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.7.1
-    )
-    FetchContent_MakeAvailable(catch2)
-    list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+    add_subdirectory(third_party/Catch2 EXCLUDE_FROM_ALL)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Catch2/extras")
 endif()
 
-include_directories(
-    ${CMAKE_SOURCE_DIR}/third_party/vgmstream/src
-    ${CMAKE_SOURCE_DIR}/third_party/shine/src/lib
-)
-
-set(BUILD_CLI OFF CACHE BOOL "" FORCE)
-set(BUILD_WINAMP OFF CACHE BOOL "" FORCE)
-set(BUILD_FB2K OFF CACHE BOOL "" FORCE)
-set(BUILD_XMPLAY OFF CACHE BOOL "" FORCE)
-set(BUILD_AUDACIOUS OFF CACHE BOOL "" FORCE)
-set(BUILD_V123 OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(BUILD_STATIC OFF CACHE BOOL "" FORCE)
-
-set(USE_MPEG OFF CACHE BOOL "Rely on FFmpeg for MPEG-family decoding" FORCE)
-set(USE_VORBIS OFF CACHE BOOL "" FORCE)
-set(USE_FFMPEG ON CACHE BOOL "Enable FFmpeg support in bundled vgmstream" FORCE)
-set(USE_G7221 OFF CACHE BOOL "" FORCE)
-set(USE_G719 OFF CACHE BOOL "" FORCE)
-set(USE_ATRAC9 OFF CACHE BOOL "" FORCE)
-set(USE_CELT OFF CACHE BOOL "" FORCE)
-set(USE_SPEEX OFF CACHE BOOL "" FORCE)
-
-add_subdirectory(third_party/vgmstream third_party/vgmstream-build EXCLUDE_FROM_ALL)
-
-if(TARGET libvgmstream AND TARGET FFMPEG_MAKE)
-    add_dependencies(libvgmstream FFMPEG_MAKE)
-endif()
-
-set(MAICONV_HAS_LIBAV_TRANSCODE OFF)
-set(MAICONV_LIBAV_LINK_LIBS)
-set(MAICONV_LIBAV_INCLUDE_DIRS)
-if(MAICONV_ENABLE_LIBAV_TRANSCODE)
-    if(TARGET avformat AND TARGET avcodec AND TARGET avutil)
-        set(MAICONV_HAS_LIBAV_TRANSCODE ON)
-        list(APPEND MAICONV_LIBAV_LINK_LIBS avformat avcodec avutil)
-        if(TARGET swresample)
-            list(APPEND MAICONV_LIBAV_LINK_LIBS swresample)
-        endif()
-        if(TARGET swscale)
-            list(APPEND MAICONV_LIBAV_LINK_LIBS swscale)
-        endif()
-    elseif(FFMPEG_LIBRARIES AND FFMPEG_INCLUDE_DIRS)
-        set(MAICONV_HAS_LIBAV_TRANSCODE ON)
-        set(MAICONV_LIBAV_LINK_LIBS ${FFMPEG_LIBRARIES})
-        set(MAICONV_LIBAV_INCLUDE_DIRS ${FFMPEG_INCLUDE_DIRS})
-    else()
-        message(STATUS "MAICONV: FFmpeg development libraries not found, libav in-process transcode disabled")
-    endif()
-endif()
-
-file(GLOB SHINE_SOURCES CONFIGURE_DEPENDS
-    third_party/shine/src/lib/*.c
-)
-add_library(shine STATIC ${SHINE_SOURCES})
-target_include_directories(shine PUBLIC third_party/shine/src/lib)
 
 set(MAICONV_UABE_LIBCOMPRESSION_SOURCES
     third_party/unity_uabe/libCompression/lz4.c
@@ -241,15 +180,10 @@ endif()
 
 target_include_directories(MaiConv_core PUBLIC include)
 target_include_directories(MaiConv_core PRIVATE
-    third_party/vgmstream/src
-    third_party/shine/src/lib
     third_party/unity_uabe/AssetsTools
     third_party/unity_uabe/Texture
     third_party
 )
-if(MAICONV_HAS_LIBAV_TRANSCODE AND MAICONV_LIBAV_INCLUDE_DIRS)
-    target_include_directories(MaiConv_core PRIVATE ${MAICONV_LIBAV_INCLUDE_DIRS})
-endif()
 target_compile_definitions(MaiConv_core PRIVATE
     MAICONV_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
     ASSETSTOOLS_IMPORTSTATIC
@@ -260,12 +194,8 @@ target_compile_definitions(MaiConv_core PRIVATE
     _CRT_SECURE_NO_WARNINGS
     _CRT_NONSTDC_NO_DEPRECATE
 )
-target_compile_definitions(MaiConv_core PUBLIC MAICONV_HAS_LIBAV=$<BOOL:${MAICONV_HAS_LIBAV_TRANSCODE}>)
 target_link_libraries(MaiConv_core PUBLIC tinyxml2::tinyxml2)
-target_link_libraries(MaiConv_core PRIVATE libvgmstream shine maiconv_uabe_assetstools)
-if(MAICONV_HAS_LIBAV_TRANSCODE AND MAICONV_LIBAV_LINK_LIBS)
-    target_link_libraries(MaiConv_core PRIVATE ${MAICONV_LIBAV_LINK_LIBS})
-endif()
+target_link_libraries(MaiConv_core PRIVATE maiconv_uabe_assetstools)
 
 if(WIN32)
     target_link_libraries(MaiConv_core PRIVATE d3d11 d3dcompiler)

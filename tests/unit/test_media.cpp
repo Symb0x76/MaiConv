@@ -514,21 +514,9 @@ TEST_CASE(
   const fs::path input_mp4 = temp_root / "input.mp4";
   REQUIRE(create_tiny_mp4_sample(input_mp4));
 
-#if MAICONV_HAS_LIBAV
-  const ScopedEnvVar scoped_ffmpeg("MAICONV_FFMPEG",
-                                   (temp_root / "missing_ffmpeg.exe").string());
-  const fs::path output_dat = temp_root / "pv.dat";
-  if (!maiconv::convert_mp4_to_dat(input_mp4, output_dat)) {
-    SKIP("libav backend enabled but runtime transcode path unavailable on this "
-         "FFmpeg build");
-  }
-  REQUIRE(fs::exists(output_dat));
-  REQUIRE(fs::file_size(output_dat) > 0U);
-#else
   const ScopedEnvVar scoped_ffmpeg("MAICONV_FFMPEG",
                                    (temp_root / "missing_ffmpeg.exe").string());
   REQUIRE_FALSE(maiconv::convert_mp4_to_dat(input_mp4, temp_root / "pv.dat"));
-#endif
 
   fs::remove_all(temp_root, ec);
 }

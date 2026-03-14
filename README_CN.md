@@ -2,7 +2,7 @@
 
 CN | [EN](./README.md)
 
-MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的跨平台 C++ 重写版本。
+MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的跨平台 C++ 重写并增强版本。
 
 ## 待办
 
@@ -11,21 +11,20 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 ## 特性
 
-- C++20 + CMake + git submodule（运行时依赖在 third_party，测试用 Catch2 通过 FetchContent 拉取）
+- C++20 + CMake + git submodule（运行时依赖在 third_party）
 - CLI 子命令：
   - `maiconv ma2`
   - `maiconv simai`
   - `maiconv assets`
   - `maiconv media`
-- 核心流程：Tokenizer -> Parser -> Chart(AST) -> Composer
 - 谱面变换：旋转 + tick 偏移
-- 三平台 CI：Windows / Linux / macOS
+- 跨平台：Windows / Linux / macOS
 
 ## 依赖目录说明
 
 - `third_party/*`：运行时第三方依赖在此目录，并由 git submodule 管理。
-- 测试依赖 `Catch2` 在 `MAICONV_BUILD_TESTS=ON` 时由 CMake FetchContent 自动拉取。
-- 当前子模块：`CLI11`、`tinyxml2`、`vgmstream`、`shine`。
+- 测试依赖 `Catch2` 在 `MAICONV_BUILD_TESTS=ON` 时也通过 git submodule 管理。
+- 构建必需子模块：`CLI11`、`tinyxml2`（启用测试时还需要 `Catch2`）。
 
 ## 构建
 
@@ -38,32 +37,36 @@ ctest --preset default
 
 ## FFmpeg 依赖说明
 
-`maiconv media` 的视频相关功能现在支持两种后端：
-- 进程内 `libav` 后端（优先）：当 `MAICONV_ENABLE_LIBAV_TRANSCODE=ON` 且在配置阶段检测到 FFmpeg 开发库时启用。
-- 外部 `ffmpeg` 后端（回退）：当进程内 `libav` 不可用时自动使用。
+`maiconv media` 的视频相关功能现已统一使用外部 `ffmpeg`。
 
 默认构建行为：
-- `MAICONV_ENABLE_LIBAV_TRANSCODE=ON`（自动检测）
-- 若检测失败，MaiConv 会回退到外部 `ffmpeg`，功能保持可用
+- 不再编译进程内 `libav` 后端
 
 构建示例：
 
 ```bash
-# 默认（自动检测进程内 libav）
+# 默认
 cmake --preset default
-
-# 强制回退后端（禁用进程内 libav）
-cmake --preset nolibav
-# 或：cmake -S . -B build/nolibav -G Ninja -DMAICONV_ENABLE_LIBAV_TRANSCODE=OFF
 ```
 
-外部 `ffmpeg` 后端要求：
+外部 `ffmpeg` 要求：
 - `ffmpeg` 可执行文件在 `PATH` 中可调用，或通过 `MAICONV_FFMPEG` 指向绝对路径
 - `ffprobe` 可选（便于手工排查媒体流信息）
 
 必需能力（按功能划分）：
 - `dat/usm -> mp4`：需要 `libx264` 编码器（MaiConv 会把 VP9 IVF 转码为 H.264 MP4）
 - `mp4 -> dat`（含有模板与无模板两种路径）：需要 `libvpx-vp9` 编码器（MaiConv 会先转码为 VP9 IVF）
+
+可选 ffmpeg 调优设置（前提是你的 ffmpeg 构建支持）：
+- `MAICONV_FFMPEG_HWACCEL`：例如 `auto`、`cuda`、`d3d11va`、`qsv`
+- `MAICONV_FFMPEG_H264_ENCODER`：例如 `h264_nvenc`、`h264_qsv`、`h264_amf`、`libx264`
+- `MAICONV_FFMPEG_VP9_ENCODER`：例如 `vp9_qsv`、`libvpx-vp9`
+- `MAICONV_FFMPEG_AUDIO_HWACCEL`：音频 ffmpeg 路径的 hwaccel 提示（取值同上）
+- `MAICONV_FFMPEG_MP3_ENCODER`：音频 ffmpeg 路径使用的 mp3 编码器（默认 `libmp3lame`）
+
+说明：
+- 音频解码转 mp3 现已统一走 ffmpeg；hwaccel 提示是 best-effort，真实提速取决于编解码器与驱动支持。
+- `mp4 -> dat` 的瓶颈常在 VP9 编码；只有当 ffmpeg 提供可用的 VP9 硬件编码器时，GPU 收益才会明显。
 
 快速自检（Windows PowerShell）：
 
@@ -205,15 +208,15 @@ assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
 ```
 
 当源素材是原版游戏格式时，`assets` 的转换策略如下：
-- `acb + awb -> track.mp3`（内置 `libvgmstream` + `shine`）
+- `acb + awb -> track.mp3`（统一使用外部 `ffmpeg` 转码）
 - `ab -> bg.png`（内置 PNG 提取）
 - `dat/usm -> pv.mp4`
-  - 仅支持 VP9 流；优先使用进程内 `libav` 转码，缺失时回退到外部 `ffmpeg`
+  - 仅支持 VP9 流；VP9->H.264 转码使用外部 `ffmpeg`
 - `mp4 + template(dat/usm) -> pv.dat`
-  - 先转码为 VP9 IVF（进程内 `libav` 或外部 `ffmpeg` 回退），再按模板 DAT/USM 的视频包结构回填并走逆向加密写回
+  - 先转码为 VP9 IVF（外部 `ffmpeg`），再按模板 DAT/USM 的视频包结构回填并走逆向加密写回
 - `mp4 -> pv.dat`（无模板）
-  - 先转码为 VP9 IVF（进程内 `libav` 或外部 `ffmpeg` 回退），再由 MaiConv 内置 C++ 打包器生成 DAT（`@SFV` 分包 + 同步加密）
-  - 回退模式要求环境中可用 `ffmpeg`（需支持 `libvpx-vp9` 编码）
+  - 先转码为 VP9 IVF（外部 `ffmpeg`），再由 MaiConv 内置 C++ 打包器生成 DAT（`@SFV` 分包 + 同步加密）
+  - 要求环境中可用 `ffmpeg`（需支持 `libvpx-vp9` 编码）
 
 若转换失败，不再保留原始素材文件；该曲目会被标记为 `_Incomplete`（未使用 `--ignore` 时则直接失败），并将失败的源/目标路径写入 `_log.txt`。
 
