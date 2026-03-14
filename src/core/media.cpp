@@ -21,7 +21,9 @@ bool extract_unity_texture_bundle_to_png(const std::filesystem::path &ab_file,
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #if defined(_WIN32)
@@ -167,6 +169,12 @@ uint32_t read_u32_be(const uint8_t *p) {
          (static_cast<uint32_t>(p[2]) << 8U) | static_cast<uint32_t>(p[3]);
 }
 
+uint32_t read_u32_le(const uint8_t *p) {
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8U) |
+         (static_cast<uint32_t>(p[2]) << 16U) |
+         (static_cast<uint32_t>(p[3]) << 24U);
+}
+
 uint16_t read_u16_le(const uint8_t *p) {
   return static_cast<uint16_t>(p[0]) |
          static_cast<uint16_t>(static_cast<uint16_t>(p[1]) << 8U);
@@ -175,6 +183,47 @@ uint16_t read_u16_le(const uint8_t *p) {
 uint16_t read_u16_be(const uint8_t *p) {
   return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8U) |
                                static_cast<uint16_t>(p[1]));
+}
+
+uint64_t read_u64_be(const uint8_t *p) {
+  return (static_cast<uint64_t>(p[0]) << 56U) |
+         (static_cast<uint64_t>(p[1]) << 48U) |
+         (static_cast<uint64_t>(p[2]) << 40U) |
+         (static_cast<uint64_t>(p[3]) << 32U) |
+         (static_cast<uint64_t>(p[4]) << 24U) |
+         (static_cast<uint64_t>(p[5]) << 16U) |
+         (static_cast<uint64_t>(p[6]) << 8U) | static_cast<uint64_t>(p[7]);
+}
+
+uint64_t read_u64_le(const uint8_t *p) {
+  return static_cast<uint64_t>(p[0]) | (static_cast<uint64_t>(p[1]) << 8U) |
+         (static_cast<uint64_t>(p[2]) << 16U) |
+         (static_cast<uint64_t>(p[3]) << 24U) |
+         (static_cast<uint64_t>(p[4]) << 32U) |
+         (static_cast<uint64_t>(p[5]) << 40U) |
+         (static_cast<uint64_t>(p[6]) << 48U) |
+         (static_cast<uint64_t>(p[7]) << 56U);
+}
+
+int8_t read_i8(const uint8_t *p) { return static_cast<int8_t>(p[0]); }
+
+int16_t read_i16_be(const uint8_t *p) {
+  return static_cast<int16_t>(read_u16_be(p));
+}
+
+int32_t read_i32_be(const uint8_t *p) {
+  return static_cast<int32_t>(read_u32_be(p));
+}
+
+int64_t read_i64_be(const uint8_t *p) {
+  return static_cast<int64_t>((static_cast<uint64_t>(p[0]) << 56U) |
+                              (static_cast<uint64_t>(p[1]) << 48U) |
+                              (static_cast<uint64_t>(p[2]) << 40U) |
+                              (static_cast<uint64_t>(p[3]) << 32U) |
+                              (static_cast<uint64_t>(p[4]) << 24U) |
+                              (static_cast<uint64_t>(p[5]) << 16U) |
+                              (static_cast<uint64_t>(p[6]) << 8U) |
+                              static_cast<uint64_t>(p[7]));
 }
 
 bool file_non_empty(const std::filesystem::path &path) {
@@ -319,14 +368,6 @@ std::optional<std::string> resolve_ffmpeg_audio_hwaccel() {
   return resolve_ffmpeg_hwaccel();
 }
 
-std::string resolve_ffmpeg_mp3_encoder() {
-  if (const auto value = read_non_empty_env("MAICONV_FFMPEG_MP3_ENCODER");
-      value.has_value()) {
-    return *value;
-  }
-  return "libmp3lame";
-}
-
 void append_unique_string(std::vector<std::string> &out,
                           const std::string &value) {
   if (value.empty()) {
@@ -344,6 +385,23 @@ void append_unique_string(std::vector<std::string> &out,
   }
   args.push_back("-hwaccel");
   args.push_back(*hwaccel);
+}
+
+std::vector<std::string> resolve_ffmpeg_mp3_encoders() {
+  std::vector<std::string> encoders;
+  if (const auto value = read_non_empty_env("MAICONV_FFMPEG_MP3_ENCODER");
+      value.has_value()) {
+    append_unique_string(encoders, *value);
+    return encoders;
+  }
+
+  append_unique_string(encoders, "libmp3lame");
+  append_unique_string(encoders, "mp3");
+  append_unique_string(encoders, "libshine");
+#if defined(_WIN32)
+  append_unique_string(encoders, "mp3_mf");
+#endif
+  return encoders;
 }
 
 std::vector<std::string> resolve_ffmpeg_h264_encoders() {
@@ -1409,6 +1467,504 @@ bool write_binary_file(const std::filesystem::path &path,
   return out.good() && file_non_empty(path);
 }
 
+enum class UtfValueKind {
+  kNull,
+  kU64,
+  kI64,
+  kF64,
+  kString,
+  kBinary,
+};
+
+struct UtfValue {
+  UtfValueKind kind = UtfValueKind::kNull;
+  uint64_t u64 = 0;
+  int64_t i64 = 0;
+  double f64 = 0.0;
+  std::string text;
+  std::vector<uint8_t> binary;
+};
+
+struct UtfColumn {
+  std::string name;
+  uint8_t value_type = 0;
+  uint8_t storage_mode = 0;
+  UtfValue constant_value;
+};
+
+struct UtfTable {
+  std::string name;
+  std::vector<UtfColumn> columns;
+  std::vector<std::vector<UtfValue>> rows;
+};
+
+constexpr uint8_t kUtfStorageZero = 0x10U;
+constexpr uint8_t kUtfStorageConstant = 0x30U;
+constexpr uint8_t kUtfStorageRow = 0x50U;
+
+bool utf_load_cstring(const std::vector<uint8_t> &bytes, std::size_t begin,
+                      std::size_t end, uint32_t relative_offset,
+                      std::string &out) {
+  if (begin > end || end > bytes.size()) {
+    return false;
+  }
+  if (relative_offset > end - begin) {
+    return false;
+  }
+  const std::size_t pos = begin + static_cast<std::size_t>(relative_offset);
+  if (pos >= end) {
+    out.clear();
+    return true;
+  }
+  std::size_t term = pos;
+  while (term < end && bytes[term] != 0U) {
+    ++term;
+  }
+  out.assign(reinterpret_cast<const char *>(bytes.data() +
+                                            static_cast<std::ptrdiff_t>(pos)),
+             term - pos);
+  return true;
+}
+
+bool utf_read_value(const std::vector<uint8_t> &bytes, std::size_t read_pos,
+                    uint8_t value_type, std::size_t strings_begin,
+                    std::size_t strings_end, std::size_t binary_begin,
+                    std::size_t binary_end, UtfValue &out,
+                    std::size_t &consumed) {
+  consumed = 0;
+  if (read_pos >= bytes.size()) {
+    return false;
+  }
+
+  const auto require = [&](std::size_t n) -> bool {
+    return n <= bytes.size() - read_pos;
+  };
+
+  out = UtfValue{};
+  switch (value_type) {
+  case 0x00: {
+    if (!require(1U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kU64;
+    out.u64 = bytes[read_pos];
+    consumed = 1U;
+    return true;
+  }
+  case 0x01: {
+    if (!require(1U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kI64;
+    out.i64 = static_cast<int64_t>(
+        read_i8(bytes.data() + static_cast<std::ptrdiff_t>(read_pos)));
+    consumed = 1U;
+    return true;
+  }
+  case 0x02: {
+    if (!require(2U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kU64;
+    out.u64 = read_u16_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    consumed = 2U;
+    return true;
+  }
+  case 0x03: {
+    if (!require(2U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kI64;
+    out.i64 = static_cast<int64_t>(
+        read_i16_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos)));
+    consumed = 2U;
+    return true;
+  }
+  case 0x04: {
+    if (!require(4U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kU64;
+    out.u64 = read_u32_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    consumed = 4U;
+    return true;
+  }
+  case 0x05: {
+    if (!require(4U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kI64;
+    out.i64 = static_cast<int64_t>(
+        read_i32_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos)));
+    consumed = 4U;
+    return true;
+  }
+  case 0x06: {
+    if (!require(8U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kU64;
+    out.u64 = read_u64_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    consumed = 8U;
+    return true;
+  }
+  case 0x07: {
+    if (!require(8U)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kI64;
+    out.i64 = read_i64_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    consumed = 8U;
+    return true;
+  }
+  case 0x08: {
+    if (!require(4U)) {
+      return false;
+    }
+    const uint32_t bits =
+        read_u32_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    float v = 0.0f;
+    std::memcpy(&v, &bits, sizeof(v));
+    out.kind = UtfValueKind::kF64;
+    out.f64 = static_cast<double>(v);
+    consumed = 4U;
+    return true;
+  }
+  case 0x09: {
+    if (!require(8U)) {
+      return false;
+    }
+    const uint64_t bits =
+        read_u64_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    double v = 0.0;
+    std::memcpy(&v, &bits, sizeof(v));
+    out.kind = UtfValueKind::kF64;
+    out.f64 = v;
+    consumed = 8U;
+    return true;
+  }
+  case 0x0A: {
+    if (!require(4U)) {
+      return false;
+    }
+    const uint32_t text_offset =
+        read_u32_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    std::string text;
+    if (!utf_load_cstring(bytes, strings_begin, strings_end, text_offset,
+                          text)) {
+      return false;
+    }
+    out.kind = UtfValueKind::kString;
+    out.text = std::move(text);
+    consumed = 4U;
+    return true;
+  }
+  case 0x0B: {
+    if (!require(8U)) {
+      return false;
+    }
+    const uint32_t data_offset =
+        read_u32_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos));
+    const uint32_t data_size =
+        read_u32_be(bytes.data() + static_cast<std::ptrdiff_t>(read_pos + 4U));
+    if (binary_begin > binary_end || data_offset > binary_end - binary_begin ||
+        data_size > binary_end - binary_begin - data_offset) {
+      return false;
+    }
+    const std::size_t begin =
+        binary_begin + static_cast<std::size_t>(data_offset);
+    const std::size_t end = begin + static_cast<std::size_t>(data_size);
+    out.kind = UtfValueKind::kBinary;
+    out.binary.assign(bytes.begin() + static_cast<std::ptrdiff_t>(begin),
+                      bytes.begin() + static_cast<std::ptrdiff_t>(end));
+    consumed = 8U;
+    return true;
+  }
+  default:
+    return false;
+  }
+}
+
+bool parse_utf_table_at(const std::vector<uint8_t> &bytes, std::size_t offset,
+                        UtfTable &out, std::size_t *consumed_size = nullptr) {
+  if (offset > bytes.size() || bytes.size() - offset < 0x20U) {
+    return false;
+  }
+  const uint8_t *p = bytes.data() + static_cast<std::ptrdiff_t>(offset);
+  if (!(p[0] == static_cast<uint8_t>('@') &&
+        p[1] == static_cast<uint8_t>('U') &&
+        p[2] == static_cast<uint8_t>('T') &&
+        p[3] == static_cast<uint8_t>('F'))) {
+    return false;
+  }
+
+  const uint32_t table_payload_size = read_u32_be(p + 4U);
+  const std::size_t table_total_size =
+      static_cast<std::size_t>(table_payload_size) + 8U;
+  if (table_total_size < 0x20U || table_total_size > bytes.size() - offset) {
+    return false;
+  }
+
+  const uint32_t rows_offset_raw = read_u32_be(p + 8U);
+  const uint32_t strings_offset = read_u32_be(p + 12U);
+  const uint32_t binary_offset = read_u32_be(p + 16U);
+  const uint32_t table_name_offset = read_u32_be(p + 20U);
+  const uint16_t column_count = read_u16_be(p + 24U);
+  const uint16_t row_length = read_u16_be(p + 26U);
+  const uint32_t row_count = read_u32_be(p + 28U);
+
+  const std::size_t payload_begin = offset + 8U;
+  const std::size_t table_end = offset + table_total_size;
+
+  uint32_t rows_offset = rows_offset_raw;
+  if (rows_offset >= table_payload_size) {
+    rows_offset &= 0xFFFFU;
+  }
+  if (rows_offset > table_payload_size || strings_offset > table_payload_size ||
+      binary_offset > table_payload_size) {
+    return false;
+  }
+
+  const std::size_t rows_begin = payload_begin + rows_offset;
+  const std::size_t strings_begin = payload_begin + strings_offset;
+  const std::size_t binary_begin = payload_begin + binary_offset;
+  if (rows_begin > table_end || strings_begin > table_end ||
+      binary_begin > table_end) {
+    return false;
+  }
+
+  std::size_t schema_pos = offset + 0x20U;
+  std::vector<UtfColumn> columns;
+  columns.reserve(static_cast<std::size_t>(column_count));
+  for (uint16_t i = 0; i < column_count; ++i) {
+    if (schema_pos > table_end || table_end - schema_pos < 5U) {
+      return false;
+    }
+
+    const uint8_t flags = bytes[schema_pos];
+    ++schema_pos;
+    const uint8_t storage_mode = static_cast<uint8_t>(flags & 0xF0U);
+    const uint8_t value_type = static_cast<uint8_t>(flags & 0x0FU);
+    const uint32_t name_offset =
+        read_u32_be(bytes.data() + static_cast<std::ptrdiff_t>(schema_pos));
+    schema_pos += 4U;
+
+    std::string name;
+    if (!utf_load_cstring(bytes, strings_begin, table_end, name_offset, name)) {
+      return false;
+    }
+
+    UtfColumn column;
+    column.name = std::move(name);
+    column.value_type = value_type;
+    column.storage_mode = storage_mode;
+
+    if (storage_mode == kUtfStorageConstant) {
+      std::size_t consumed = 0U;
+      if (!utf_read_value(bytes, schema_pos, value_type, strings_begin,
+                          table_end, binary_begin, table_end,
+                          column.constant_value, consumed)) {
+        return false;
+      }
+      if (consumed > table_end - schema_pos) {
+        return false;
+      }
+      schema_pos += consumed;
+    } else if (storage_mode != kUtfStorageZero &&
+               storage_mode != kUtfStorageRow) {
+      return false;
+    }
+
+    columns.push_back(std::move(column));
+  }
+
+  if (rows_begin > table_end) {
+    return false;
+  }
+  const std::size_t total_rows_size = static_cast<std::size_t>(row_length) *
+                                      static_cast<std::size_t>(row_count);
+  if (total_rows_size > table_end - rows_begin) {
+    return false;
+  }
+
+  std::vector<std::vector<UtfValue>> rows;
+  rows.reserve(static_cast<std::size_t>(row_count));
+  for (uint32_t r = 0; r < row_count; ++r) {
+    const std::size_t row_begin =
+        rows_begin + static_cast<std::size_t>(r) * row_length;
+    const std::size_t row_end = row_begin + row_length;
+    std::size_t row_pos = row_begin;
+
+    std::vector<UtfValue> row_values;
+    row_values.reserve(columns.size());
+    for (const auto &column : columns) {
+      UtfValue value;
+      if (column.storage_mode == kUtfStorageZero) {
+        value.kind = UtfValueKind::kNull;
+      } else if (column.storage_mode == kUtfStorageConstant) {
+        value = column.constant_value;
+      } else { // kUtfStorageRow
+        std::size_t consumed = 0U;
+        if (!utf_read_value(bytes, row_pos, column.value_type, strings_begin,
+                            table_end, binary_begin, table_end, value,
+                            consumed)) {
+          return false;
+        }
+        if (consumed > row_end - row_pos) {
+          return false;
+        }
+        row_pos += consumed;
+      }
+      row_values.push_back(std::move(value));
+    }
+    if (row_pos > row_end) {
+      return false;
+    }
+    rows.push_back(std::move(row_values));
+  }
+
+  std::string table_name;
+  if (!utf_load_cstring(bytes, strings_begin, table_end, table_name_offset,
+                        table_name)) {
+    return false;
+  }
+
+  out = UtfTable{};
+  out.name = std::move(table_name);
+  out.columns = std::move(columns);
+  out.rows = std::move(rows);
+  if (consumed_size != nullptr) {
+    *consumed_size = table_total_size;
+  }
+  return true;
+}
+
+const UtfValue *utf_find_cell(const UtfTable &table, std::size_t row_index,
+                              const char *column_name) {
+  if (column_name == nullptr || row_index >= table.rows.size()) {
+    return nullptr;
+  }
+  for (std::size_t i = 0; i < table.columns.size(); ++i) {
+    if (table.columns[i].name == column_name) {
+      return i < table.rows[row_index].size() ? &table.rows[row_index][i]
+                                              : nullptr;
+    }
+  }
+  return nullptr;
+}
+
+std::optional<uint64_t> utf_value_as_u64(const UtfValue *value) {
+  if (value == nullptr) {
+    return std::nullopt;
+  }
+  switch (value->kind) {
+  case UtfValueKind::kU64:
+    return value->u64;
+  case UtfValueKind::kI64:
+    if (value->i64 < 0) {
+      return std::nullopt;
+    }
+    return static_cast<uint64_t>(value->i64);
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<std::string> utf_value_as_string(const UtfValue *value) {
+  if (value == nullptr || value->kind != UtfValueKind::kString) {
+    return std::nullopt;
+  }
+  return value->text;
+}
+
+struct AcbMetadata {
+  std::string stream_awb_name;
+  std::vector<uint32_t> stream_awb_ids;
+};
+
+bool parse_acb_metadata(const std::filesystem::path &acb_path,
+                        AcbMetadata &metadata_out) {
+  metadata_out = AcbMetadata{};
+  std::vector<uint8_t> acb_bytes;
+  if (!read_binary_file(acb_path, acb_bytes)) {
+    return false;
+  }
+
+  UtfTable root;
+  if (!parse_utf_table_at(acb_bytes, 0U, root)) {
+    return false;
+  }
+
+  std::unordered_map<std::string, UtfTable> tables;
+  auto add_table = [&](UtfTable table) {
+    if (table.name.empty()) {
+      return;
+    }
+    tables.emplace(table.name, std::move(table));
+  };
+  add_table(root);
+
+  std::vector<UtfTable> pending;
+  pending.push_back(root);
+  for (std::size_t i = 0; i < pending.size(); ++i) {
+    const auto &table = pending[i];
+    for (const auto &row : table.rows) {
+      for (const auto &cell : row) {
+        if (cell.kind != UtfValueKind::kBinary || cell.binary.size() < 0x20U) {
+          continue;
+        }
+        UtfTable nested;
+        if (!parse_utf_table_at(cell.binary, 0U, nested)) {
+          continue;
+        }
+        if (nested.name.empty() || tables.find(nested.name) != tables.end()) {
+          continue;
+        }
+        pending.push_back(nested);
+        add_table(std::move(nested));
+      }
+    }
+  }
+
+  if (const auto it = tables.find("StreamAwb");
+      it != tables.end() && !it->second.rows.empty()) {
+    const auto name =
+        utf_value_as_string(utf_find_cell(it->second, 0U, "Name"));
+    if (name.has_value()) {
+      metadata_out.stream_awb_name = *name;
+    }
+  }
+
+  if (const auto it = tables.find("Waveform"); it != tables.end()) {
+    std::set<uint32_t> unique_ids;
+    for (std::size_t row = 0; row < it->second.rows.size(); ++row) {
+      const auto stream_awb_id_opt =
+          utf_value_as_u64(utf_find_cell(it->second, row, "StreamAwbId"));
+      if (!stream_awb_id_opt.has_value() ||
+          *stream_awb_id_opt > std::numeric_limits<uint32_t>::max()) {
+        continue;
+      }
+
+      bool include = true;
+      if (const auto streaming_opt =
+              utf_value_as_u64(utf_find_cell(it->second, row, "Streaming"));
+          streaming_opt.has_value()) {
+        include = (*streaming_opt != 0U);
+      }
+      if (!include) {
+        continue;
+      }
+
+      const uint32_t id = static_cast<uint32_t>(*stream_awb_id_opt);
+      if (unique_ids.insert(id).second) {
+        metadata_out.stream_awb_ids.push_back(id);
+      }
+    }
+  }
+
+  return true;
+}
+
 struct UsmVideoPayloadChunk {
   std::size_t payload_begin = 0;
   std::size_t payload_size = 0;
@@ -1616,8 +2172,259 @@ bool convert_usm_to_mp4(const std::filesystem::path &source,
   return transcode_vp9_ivf_to_h264_mp4(stream.data, target_mp4);
 }
 
-bool transcode_audio_to_mp3_ffmpeg(const std::filesystem::path &source,
-                                   const std::filesystem::path &target_mp3) {
+struct Afs2Entry {
+  uint32_t id = 0U;
+  std::size_t begin = 0;
+  std::size_t end = 0;
+};
+
+bool parse_afs2_entries(const std::vector<uint8_t> &awb_bytes,
+                        std::vector<Afs2Entry> &out_entries) {
+  out_entries.clear();
+  if (awb_bytes.size() < 16U) {
+    return false;
+  }
+  if (!(awb_bytes[0] == static_cast<uint8_t>('A') &&
+        awb_bytes[1] == static_cast<uint8_t>('F') &&
+        awb_bytes[2] == static_cast<uint8_t>('S') &&
+        awb_bytes[3] == static_cast<uint8_t>('2'))) {
+    return false;
+  }
+
+  const uint8_t offset_size = awb_bytes[5];
+  const uint8_t id_size = awb_bytes[6];
+  if (!(id_size == 1U || id_size == 2U || id_size == 4U) ||
+      !(offset_size == 2U || offset_size == 4U || offset_size == 8U)) {
+    return false;
+  }
+
+  const uint32_t entry_count_u32 = read_u32_le(awb_bytes.data() + 8);
+  if (entry_count_u32 == 0U) {
+    return false;
+  }
+  const std::size_t entry_count = static_cast<std::size_t>(entry_count_u32);
+  if (entry_count >
+      std::numeric_limits<std::size_t>::max() / static_cast<std::size_t>(2U)) {
+    return false;
+  }
+
+  const std::size_t align = std::max<std::size_t>(
+      1U, static_cast<std::size_t>(read_u16_le(awb_bytes.data() + 12)));
+
+  if (entry_count > std::numeric_limits<std::size_t>::max() /
+                        static_cast<std::size_t>(id_size)) {
+    return false;
+  }
+  const std::size_t id_table_size =
+      entry_count * static_cast<std::size_t>(id_size);
+  const std::size_t offset_count = entry_count + 1U;
+  if (offset_count > std::numeric_limits<std::size_t>::max() /
+                         static_cast<std::size_t>(offset_size)) {
+    return false;
+  }
+  const std::size_t offset_table_size =
+      offset_count * static_cast<std::size_t>(offset_size);
+  const std::size_t id_table_begin = 16U;
+  const std::size_t offset_table_begin = id_table_begin + id_table_size;
+  if (offset_table_begin > awb_bytes.size() ||
+      offset_table_size > awb_bytes.size() - offset_table_begin) {
+    return false;
+  }
+
+  std::vector<uint32_t> ids;
+  ids.reserve(entry_count);
+  for (std::size_t i = 0; i < entry_count; ++i) {
+    const std::size_t pos =
+        id_table_begin + i * static_cast<std::size_t>(id_size);
+    const uint8_t *p = awb_bytes.data() + static_cast<std::ptrdiff_t>(pos);
+    uint32_t id = 0U;
+    if (id_size == 1U) {
+      id = p[0];
+    } else if (id_size == 2U) {
+      id = read_u16_le(p);
+    } else {
+      id = read_u32_le(p);
+    }
+    ids.push_back(id);
+  }
+
+  std::vector<uint64_t> offsets;
+  offsets.reserve(offset_count);
+  for (std::size_t i = 0; i < offset_count; ++i) {
+    const std::size_t pos =
+        offset_table_begin + i * static_cast<std::size_t>(offset_size);
+    const uint8_t *p = awb_bytes.data() + static_cast<std::ptrdiff_t>(pos);
+    uint64_t value = 0;
+    if (offset_size == 2U) {
+      value = static_cast<uint64_t>(read_u16_le(p));
+    } else if (offset_size == 4U) {
+      value = static_cast<uint64_t>(read_u32_le(p));
+    } else {
+      value = read_u64_le(p);
+    }
+    offsets.push_back(value);
+  }
+
+  const uint64_t max_size = static_cast<uint64_t>(awb_bytes.size());
+  for (std::size_t i = 0; i < entry_count; ++i) {
+    const uint64_t begin_raw = offsets[i];
+    const uint64_t end_raw = offsets[i + 1U];
+    if (end_raw <= begin_raw || end_raw > max_size) {
+      continue;
+    }
+
+    uint64_t begin_aligned = begin_raw;
+    if (align > 1U) {
+      const uint64_t align_u64 = static_cast<uint64_t>(align);
+      const uint64_t rem = begin_raw % align_u64;
+      if (rem != 0U) {
+        begin_aligned += align_u64 - rem;
+      }
+    }
+    if (begin_aligned >= end_raw || begin_aligned > max_size) {
+      continue;
+    }
+
+    out_entries.push_back({ids[i], static_cast<std::size_t>(begin_aligned),
+                           static_cast<std::size_t>(end_raw)});
+  }
+  if (out_entries.empty()) {
+    return false;
+  }
+  return true;
+}
+
+bool transcode_audio_file_to_mp3_ffmpeg(const std::filesystem::path &source,
+                                        const std::filesystem::path &target_mp3,
+                                        const std::string &encoder) {
+#if defined(_WIN32)
+  std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+  append_audio_hwaccel_arg(args);
+  args.insert(args.end(), {L"-i", source.wstring(), L"-vn", L"-c:a",
+                           widen_ascii(encoder), target_mp3.wstring()});
+  const bool ok = run_ffmpeg_process(args);
+#else
+  std::vector<std::string> args = {"-y", "-loglevel", "error"};
+  append_audio_hwaccel_arg(args);
+  args.insert(args.end(), {"-i", path_to_utf8(source), "-vn", "-c:a", encoder,
+                           path_to_utf8(target_mp3)});
+  const bool ok = run_ffmpeg_process(args);
+#endif
+  return ok && file_non_empty(target_mp3);
+}
+
+bool transcode_audio_stdin_to_mp3_ffmpeg(
+    const std::vector<uint8_t> &payload,
+    const std::filesystem::path &target_mp3, const std::string &encoder,
+    const std::optional<std::string> &force_format) {
+  if (payload.empty()) {
+    return false;
+  }
+
+#if defined(_WIN32)
+  std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
+  append_audio_hwaccel_arg(args);
+  if (force_format.has_value()) {
+    args.push_back(L"-f");
+    args.push_back(widen_ascii(*force_format));
+  }
+  args.insert(args.end(), {L"-i", L"pipe:0", L"-vn", L"-c:a",
+                           widen_ascii(encoder), target_mp3.wstring()});
+  const bool ok = run_ffmpeg_feed_stdin(args, payload);
+#else
+  std::vector<std::string> args = {"-y", "-loglevel", "error"};
+  append_audio_hwaccel_arg(args);
+  if (force_format.has_value()) {
+    args.push_back("-f");
+    args.push_back(*force_format);
+  }
+  args.insert(args.end(), {"-i", "pipe:0", "-vn", "-c:a", encoder,
+                           path_to_utf8(target_mp3)});
+  const bool ok = run_ffmpeg_feed_stdin(args, payload);
+#endif
+  return ok && file_non_empty(target_mp3);
+}
+
+bool transcode_awb_afs2_to_mp3_ffmpeg(
+    const std::filesystem::path &source_awb,
+    const std::filesystem::path &target_mp3,
+    const std::vector<std::string> &mp3_encoders,
+    const std::vector<uint32_t> *preferred_entry_ids) {
+  if (mp3_encoders.empty()) {
+    return false;
+  }
+
+  std::vector<uint8_t> awb_bytes;
+  if (!read_binary_file(source_awb, awb_bytes)) {
+    return false;
+  }
+
+  std::vector<Afs2Entry> entries;
+  if (!parse_afs2_entries(awb_bytes, entries)) {
+    return false;
+  }
+
+  std::vector<Afs2Entry> candidates;
+  candidates.reserve(entries.size());
+
+  std::vector<bool> used(entries.size(), false);
+  if (preferred_entry_ids != nullptr && !preferred_entry_ids->empty()) {
+    for (const uint32_t wanted_id : *preferred_entry_ids) {
+      for (std::size_t i = 0; i < entries.size(); ++i) {
+        if (!used[i] && entries[i].id == wanted_id) {
+          candidates.push_back(entries[i]);
+          used[i] = true;
+        }
+      }
+    }
+  }
+
+  std::vector<Afs2Entry> remaining;
+  remaining.reserve(entries.size());
+  for (std::size_t i = 0; i < entries.size(); ++i) {
+    if (!used[i]) {
+      remaining.push_back(entries[i]);
+    }
+  }
+  std::stable_sort(remaining.begin(), remaining.end(),
+                   [](const Afs2Entry &lhs, const Afs2Entry &rhs) {
+                     return (lhs.end - lhs.begin) > (rhs.end - rhs.begin);
+                   });
+  candidates.insert(candidates.end(), remaining.begin(), remaining.end());
+
+  constexpr std::array<const char *, 3> kDemuxers = {"hca", "adx", ""};
+  for (const auto &entry : candidates) {
+    if (entry.end <= entry.begin || entry.end > awb_bytes.size()) {
+      continue;
+    }
+
+    std::vector<uint8_t> payload(entry.end - entry.begin, 0U);
+    std::copy(awb_bytes.begin() + static_cast<std::ptrdiff_t>(entry.begin),
+              awb_bytes.begin() + static_cast<std::ptrdiff_t>(entry.end),
+              payload.begin());
+
+    for (const char *demuxer : kDemuxers) {
+      const std::optional<std::string> force_format =
+          (demuxer != nullptr && demuxer[0] != '\0')
+              ? std::optional<std::string>(demuxer)
+              : std::nullopt;
+      for (const auto &encoder : mp3_encoders) {
+        remove_file_if_exists(target_mp3);
+        if (transcode_audio_stdin_to_mp3_ffmpeg(payload, target_mp3, encoder,
+                                                force_format)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+bool transcode_audio_to_mp3_ffmpeg(
+    const std::filesystem::path &source,
+    const std::filesystem::path &target_mp3,
+    const std::vector<uint32_t> *preferred_awb_entry_ids = nullptr) {
   if (!file_non_empty(source)) {
     return false;
   }
@@ -1625,23 +2432,24 @@ bool transcode_audio_to_mp3_ffmpeg(const std::filesystem::path &source,
     std::filesystem::create_directories(target_mp3.parent_path());
   }
 
-#if defined(_WIN32)
-  std::vector<std::wstring> args = {L"-y", L"-loglevel", L"error"};
-  append_audio_hwaccel_arg(args);
-  args.insert(args.end(), {L"-i", source.wstring(), L"-vn", L"-c:a",
-                           widen_ascii(resolve_ffmpeg_mp3_encoder()),
-                           target_mp3.wstring()});
-  const bool ok = run_ffmpeg_process(args);
-#else
-  std::vector<std::string> args = {"-y", "-loglevel", "error"};
-  append_audio_hwaccel_arg(args);
-  args.insert(args.end(),
-              {"-i", path_to_utf8(source), "-vn", "-c:a",
-               resolve_ffmpeg_mp3_encoder(), path_to_utf8(target_mp3)});
-  const bool ok = run_ffmpeg_process(args);
-#endif
+  const auto mp3_encoders = resolve_ffmpeg_mp3_encoders();
+  if (mp3_encoders.empty()) {
+    return false;
+  }
 
-  return ok && file_non_empty(target_mp3);
+  for (const auto &encoder : mp3_encoders) {
+    remove_file_if_exists(target_mp3);
+    if (transcode_audio_file_to_mp3_ffmpeg(source, target_mp3, encoder)) {
+      return true;
+    }
+  }
+
+  if (lower(source.extension().string()) == ".awb") {
+    return transcode_awb_afs2_to_mp3_ffmpeg(source, target_mp3, mp3_encoders,
+                                            preferred_awb_entry_ids);
+  }
+
+  return false;
 }
 } // namespace
 
@@ -1733,11 +2541,34 @@ bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
     }
   }
 
+  AcbMetadata acb_metadata;
+  std::vector<uint32_t> preferred_awb_entry_ids;
+  if (parse_acb_metadata(decode_acb, acb_metadata) &&
+      !acb_metadata.stream_awb_ids.empty()) {
+    bool awb_name_matches = true;
+    if (!acb_metadata.stream_awb_name.empty()) {
+      std::string expected = lower(acb_metadata.stream_awb_name);
+      if (expected.size() > 4U &&
+          expected.substr(expected.size() - 4U) == ".awb") {
+        expected.resize(expected.size() - 4U);
+      }
+      const std::string awb_stem = lower(decode_awb.stem().string());
+      const std::string awb_file = lower(decode_awb.filename().string());
+      awb_name_matches = (expected == awb_stem) || (expected == awb_file);
+    }
+    if (awb_name_matches) {
+      preferred_awb_entry_ids = acb_metadata.stream_awb_ids;
+    }
+  }
+
   if (transcode_audio_to_mp3_ffmpeg(decode_acb, target_mp3)) {
     return true;
   }
 
-  return transcode_audio_to_mp3_ffmpeg(decode_awb, target_mp3);
+  const std::vector<uint32_t> *preferred_ids_ptr =
+      preferred_awb_entry_ids.empty() ? nullptr : &preferred_awb_entry_ids;
+  return transcode_audio_to_mp3_ffmpeg(decode_awb, target_mp3,
+                                       preferred_ids_ptr);
 }
 
 bool convert_mp3_to_acb_awb(const std::filesystem::path &source_mp3,
