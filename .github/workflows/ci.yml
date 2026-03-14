@@ -28,8 +28,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg pkg-config nasm yasm \
-          libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+        sudo apt-get install -y ffmpeg pkg-config nasm yasm
 
     - name: Install FFmpeg build prerequisites (macOS)
       if: runner.os == 'macOS'
@@ -49,14 +48,17 @@ jobs:
     - name: Test
       run: ctest --preset default
 
-    - name: Configure (No LibAV fallback)
-      if: runner.os == 'Linux'
-      run: cmake --preset nolibav
+    - name: Smoke test --gpu flag (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        & "build/default/MaiConv.exe" media video --gpu --help | Out-Null
+        & "build/default/MaiConv.exe" media audio --gpu --help | Out-Null
+        & "build/default/MaiConv.exe" assets --gpu --help | Out-Null
 
-    - name: Build (No LibAV fallback)
-      if: runner.os == 'Linux'
-      run: cmake --build --preset nolibav --parallel
-
-    - name: Test (No LibAV fallback)
-      if: runner.os == 'Linux'
-      run: ctest --preset nolibav
+    - name: Smoke test --gpu flag (Linux/macOS)
+      if: runner.os != 'Windows'
+      run: |
+        ./build/default/MaiConv media video --gpu --help > /dev/null
+        ./build/default/MaiConv media audio --gpu --help > /dev/null
+        ./build/default/MaiConv assets --gpu --help > /dev/null

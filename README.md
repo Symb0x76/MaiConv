@@ -63,10 +63,24 @@ Optional ffmpeg tuning settings (when your ffmpeg build supports them):
 - `MAICONV_FFMPEG_VP9_ENCODER`: e.g. `vp9_qsv`, `libvpx-vp9`
 - `MAICONV_FFMPEG_AUDIO_HWACCEL`: audio ffmpeg path hwaccel hint (same values as above)
 - `MAICONV_FFMPEG_MP3_ENCODER`: mp3 encoder for ffmpeg path (default `libmp3lame`)
+- CLI `--gpu` flag (for `assets` and `media audio|video`): auto-enables GPU hints and encoder fallback without manual env vars
 
 Notes:
 - Audio decode -> mp3 now always routes through ffmpeg; hwaccel hints are best-effort and real gains still depend on codec/driver support.
 - `mp4 -> dat` often still depends on VP9 encode throughput; GPU benefit depends on whether your ffmpeg provides a VP9 hardware encoder.
+- `--gpu` sets `MAICONV_FFMPEG_GPU=1` and fills `MAICONV_FFMPEG_HWACCEL/AUDIO_HWACCEL=auto` only when they are unset, so explicit env vars still win.
+
+PowerShell quick start (`--gpu` + explicit override):
+
+```powershell
+# auto GPU hints
+maiconv media video --input .\pv.mp4 --output .\pv.dat --gpu
+
+# force your own choice (overrides --gpu defaults)
+$env:MAICONV_FFMPEG_HWACCEL="cuda"
+$env:MAICONV_FFMPEG_H264_ENCODER="h264_nvenc"
+maiconv media video --input .\001944.dat --output .\pv.mp4 --gpu
+```
 
 Quick checks (Windows PowerShell):
 
@@ -104,6 +118,8 @@ Export all tracks from StreamingAssets:
 
 ```bash
 maiconv assets --input /path/to/StreamingAssets --output ./Output --layout flat
+# auto GPU hint + encoder fallback
+# maiconv assets --input /path/to/StreamingAssets --output ./Output --layout flat --gpu
 ```
 
 Export one id (all difficulties):
@@ -180,6 +196,8 @@ Convert MP4 to DAT directly (no template, built-in C++ path):
 
 ```bash
 maiconv media video --input /path/to/pv.mp4 --output ./pv.dat
+# auto GPU hint + encoder fallback
+# maiconv media video --input /path/to/pv.mp4 --output ./pv.dat --gpu
 ```
 
 ## Asset Naming Compatibility

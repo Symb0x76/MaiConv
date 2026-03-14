@@ -63,10 +63,24 @@ cmake --preset default
 - `MAICONV_FFMPEG_VP9_ENCODER`：例如 `vp9_qsv`、`libvpx-vp9`
 - `MAICONV_FFMPEG_AUDIO_HWACCEL`：音频 ffmpeg 路径的 hwaccel 提示（取值同上）
 - `MAICONV_FFMPEG_MP3_ENCODER`：音频 ffmpeg 路径使用的 mp3 编码器（默认 `libmp3lame`）
+- CLI `--gpu` 参数（`assets` 与 `media audio|video`）：自动开启 GPU 提示与编码器回退，减少手动环境变量配置
 
 说明：
 - 音频解码转 mp3 现已统一走 ffmpeg；hwaccel 提示是 best-effort，真实提速取决于编解码器与驱动支持。
 - `mp4 -> dat` 的瓶颈常在 VP9 编码；只有当 ffmpeg 提供可用的 VP9 硬件编码器时，GPU 收益才会明显。
+- `--gpu` 会设置 `MAICONV_FFMPEG_GPU=1`，并且仅在未设置时补 `MAICONV_FFMPEG_HWACCEL/AUDIO_HWACCEL=auto`；你手动设置的环境变量优先级更高。
+
+PowerShell 快速示例（`--gpu` + 手动覆盖）：
+
+```powershell
+# 自动 GPU 提示
+maiconv media video --input .\pv.mp4 --output .\pv.dat --gpu
+
+# 手动指定优先（覆盖 --gpu 默认）
+$env:MAICONV_FFMPEG_HWACCEL="cuda"
+$env:MAICONV_FFMPEG_H264_ENCODER="h264_nvenc"
+maiconv media video --input .\001944.dat --output .\pv.mp4 --gpu
+```
 
 快速自检（Windows PowerShell）：
 
@@ -104,6 +118,8 @@ maiconv simai --input /path/to/maidata.txt --difficulty 3 --format ma2 --output 
 
 ```bash
 maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat
+# 自动启用 GPU 提示 + 编码器回退
+# maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat --gpu
 ```
 
 导出指定 id（该 id 的全部难度）：
@@ -174,6 +190,8 @@ MP4 转 DAT：
 
 ```bash
 maiconv media video --input /path/to/pv.mp4 --output ./pv.dat
+# 自动启用 GPU 提示 + 编码器回退
+# maiconv media video --input /path/to/pv.mp4 --output ./pv.dat --gpu
 ```
 
 ## 资产命名兼容

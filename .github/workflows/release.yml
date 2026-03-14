@@ -59,7 +59,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y nasm yasm pkg-config libavformat-dev libavcodec-dev libavutil-dev libswresample-dev
+        sudo apt-get install -y ffmpeg nasm yasm pkg-config
 
     - name: Install FFmpeg prerequisites (macOS)
       if: runner.os == 'macOS'
@@ -95,11 +95,17 @@ jobs:
       shell: pwsh
       run: |
         & "dist/${{ matrix.asset_name }}" --help | Out-Null
+        & "dist/${{ matrix.asset_name }}" media video --gpu --help | Out-Null
+        & "dist/${{ matrix.asset_name }}" media audio --gpu --help | Out-Null
+        & "dist/${{ matrix.asset_name }}" assets --gpu --help | Out-Null
 
     - name: Smoke test binary (Linux/macOS)
       if: runner.os != 'Windows'
       run: |
         ./dist/${{ matrix.asset_name }} --help > /dev/null
+        ./dist/${{ matrix.asset_name }} media video --gpu --help > /dev/null
+        ./dist/${{ matrix.asset_name }} media audio --gpu --help > /dev/null
+        ./dist/${{ matrix.asset_name }} assets --gpu --help > /dev/null
 
     - name: Upload release artifact
       uses: actions/upload-artifact@v4
