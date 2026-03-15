@@ -6,7 +6,7 @@ on:
 
 
 jobs:
-  build-and-test:
+  build:
     strategy:
       fail-fast: false
       matrix:
@@ -45,8 +45,69 @@ jobs:
     - name: Build
       run: cmake --build --preset default --parallel
 
-    - name: Test
-      run: ctest --preset default
+    - name: Build CMake Tests target
+      run: cmake --build --preset default --target MaiConv_unit_tests --parallel
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.os }}
+        path: build/default
+        if-no-files-found: error
+        retention-days: 7
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-${{ matrix.os }}
+        path: build/default
+
+    - name: Verify CTest discovery
+      run: |
+        ctest --preset default --show-only=human
+        ctest --preset default --print-labels
+
+    - name: Run CTest (with detailed output)
+      id: ctest_run
+      continue-on-error: true
+      run: ctest --preset default --output-on-failure --no-tests=error --progress --output-junit build/default/Testing/ctest-junit.xml
+
+    - name: Re-run failed tests verbosely
+      if: steps.ctest_run.outcome == 'failure'
+      run: ctest --preset default --rerun-failed --output-on-failure --verbose
+
+    - name: Upload CTest results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-results-${{ matrix.os }}
+        path: |
+          build/default/Testing/**
+          build/default/ctest.log
+        if-no-files-found: warn
+        retention-days: 14
+
+    - name: Fail if CTest failed
+      if: steps.ctest_run.outcome == 'failure'
+      run: |
+        echo "CTest failed. See ctest-results-${{ matrix.os }} artifact for logs and JUnit summary."
+        exit 1
 
     - name: Smoke test --gpu flag (Windows)
       if: runner.os == 'Windows'

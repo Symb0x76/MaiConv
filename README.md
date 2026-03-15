@@ -37,7 +37,7 @@ ctest --preset default
 
 ## FFmpeg Dependency Details
 
-Video processing in `maiconv media` and `maiconv assets` uses external `ffmpeg`.
+Audio and Video processing in `maiconv media` and `maiconv assets` uses external `ffmpeg`.
 
 External `ffmpeg` executable requirements:
 - `ffmpeg` should be available in `PATH`, or set `MAICONV_FFMPEG` to an absolute executable path.
@@ -56,8 +56,8 @@ Optional ffmpeg tuning settings (when your ffmpeg build supports them):
 - CLI `--gpu` flag (for `assets` and `media audio|video`): auto-enables GPU hints and encoder fallback without manual env vars
 
 Notes:
-- Audio decode -> mp3 now always routes through ffmpeg; hwaccel hints are best-effort and real gains still depend on codec/driver support.
-- `mp4 -> dat` often still depends on VP9 encode throughput; GPU benefit depends on whether your ffmpeg provides a VP9 hardware encoder.
+- hwaccel hints are best-effort and real gains still depend on codec/driver support.
+- `mp4 -> dat` depends on VP9 encode throughput; GPU benefit depends on whether your ffmpeg provides a VP9 hardware encoder.
 - `--gpu` sets `MAICONV_FFMPEG_GPU=1` and fills `MAICONV_FFMPEG_HWACCEL/AUDIO_HWACCEL=auto` only when they are unset, so explicit env vars still win.
 
 PowerShell quick start (`--gpu` + explicit override):
@@ -69,7 +69,7 @@ maiconv media video --input .\pv.mp4 --output .\pv.dat --gpu
 # force your own choice (overrides --gpu defaults)
 $env:MAICONV_FFMPEG_HWACCEL="cuda"
 $env:MAICONV_FFMPEG_H264_ENCODER="h264_nvenc"
-maiconv media video --input .\001944.dat --output .\pv.mp4 --gpu
+maiconv media video --input .\001145.dat --output .\pv.mp4 --gpu
 ```
 
 Quick checks:
@@ -103,8 +103,6 @@ Export all tracks:
 
 ```bash
 maiconv assets --input /path/to/StreamingAssets --output ./Output --layout flat
-# auto GPU hint + encoder fallback
-# maiconv assets --input /path/to/StreamingAssets --output ./Output --layout flat --gpu
 ```
 
 Export one or more ids (all difficulties):
@@ -216,8 +214,6 @@ Convert MP4 to DAT:
 
 ```bash
 maiconv media video --input /path/to/pv.mp4 --output ./pv.dat
-# auto GPU hint + encoder fallback
-# maiconv media video --input /path/to/pv.mp4 --output ./pv.dat --gpu
 ```
 
 ## Asset Naming Compatibility
