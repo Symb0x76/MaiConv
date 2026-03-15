@@ -27,8 +27,5 @@ bool generate_single_frame_mp4_from_image(
 bool generate_single_frame_black_mp4(const std::filesystem::path &target_mp4);
 bool convert_mp4_to_dat(const std::filesystem::path &source_mp4,
                         const std::filesystem::path &target_dat);
-bool convert_mp4_to_dat_with_template(const std::filesystem::path &source_mp4,
-                                      const std::filesystem::path &template_dat,
-                                      const std::filesystem::path &target_dat);
 
 } // namespace maiconv

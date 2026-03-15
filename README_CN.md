@@ -6,8 +6,9 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 ## 待办
 
-- [ ] 增加 png/mp3/mp4 -> ab/awb+acb/dat 资产导出
+- [ ] 在 `assets` 流程中补齐反向资产导出（目前 `maiconv media` 已支持：`png->ab`、`mp3->acb+awb`、`mp4->dat`）
 - [ ] 实现本地lz4取代对UABE的依赖以提升跨平台性能
+- [ ] 协宴谱分离1P/2P谱面（目前宴谱仍以 `difficulty=7` 的形式与普通谱共存）
 
 ## 特性
 
@@ -37,25 +38,15 @@ ctest --preset default
 
 ## FFmpeg 依赖说明
 
-`maiconv media` 的视频相关功能现已统一使用外部 `ffmpeg`。
-
-默认构建行为：
-- 不再编译进程内 `libav` 后端
-
-构建示例：
-
-```bash
-# 默认
-cmake --preset default
-```
+`maiconv media` 与 `maiconv assets` 的视频处理统一依赖外部 `ffmpeg`。
 
 外部 `ffmpeg` 要求：
 - `ffmpeg` 可执行文件在 `PATH` 中可调用，或通过 `MAICONV_FFMPEG` 指向绝对路径
 - `ffprobe` 可选（便于手工排查媒体流信息）
 
 必需能力（按功能划分）：
-- `dat/usm -> mp4`：需要 `libx264` 编码器（MaiConv 会把 VP9 IVF 转码为 H.264 MP4）
-- `mp4 -> dat`（含有模板与无模板两种路径）：需要 `libvpx-vp9` 编码器（MaiConv 会先转码为 VP9 IVF）
+- `dat/usm/crid -> mp4`：支持 VP9 IVF、H.264 Annex-B、MPEG 视频流；能流复制时会优先流复制，但在回退转码路径上需要 H.264 编码器（`libx264` 或硬件编码器）
+- `mp4 -> dat`：需要 VP9 编码器（`libvpx-vp9` 或硬件编码器），因为 MaiConv 会先转码为 VP9 IVF
 
 可选 ffmpeg 调优设置（前提是你的 ffmpeg 构建支持）：
 - `MAICONV_FFMPEG_HWACCEL`：例如 `auto`、`cuda`、`d3d11va`、`qsv`
@@ -96,7 +87,7 @@ ffmpeg -version
 ffmpeg -hide_banner -encoders | grep -E "libx264|libvpx-vp9"
 ```
 
-若缺少编码器，请安装带完整编码库的 ffmpeg 发行版（包含 `libx264` 与 `libvpx`）。
+若缺少所需编码器，请安装可提供至少一种 H.264 编码器和一种 VP9 编码器的 ffmpeg 发行版（推荐基线：`libx264` + `libvpx-vp9`）。
 
 ## CLI
 
@@ -114,7 +105,9 @@ maiconv simai --input /path/to/maidata.txt --difficulty 3 --format ma2 --output 
 
 ### assets
 
-导出 StreamingAssets 中的全部曲目：
+常用命令：
+
+导出全部曲目：
 
 ```bash
 maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat
@@ -122,16 +115,22 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat
 # maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat --gpu
 ```
 
-导出指定 id（该 id 的全部难度）：
+导出一个或多个 id（命中 id 的全部难度）：
 
 ```bash
-maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514 --layout flat
+maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514,363 --layout flat
 ```
 
-导出指定 id 的指定难度：
+导出指定 id 的指定难度（多值）：
 
 ```bash
-maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514 --difficulty 3 --layout flat
+maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514,363 --difficulty 2,3,7 --layout flat
+```
+
+按正则筛选数字：
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./output --id '^11\\d{4}$' --difficulty '^[23]$' --layout flat
 ```
 
 以显示等级导出 `maidata.txt` 中的 `lv_*`：
@@ -146,19 +145,50 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --format maida
 maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat --resume
 ```
 
-规则：
+缺失媒体时自动补齐占位文件：
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat --dummy
+```
+
+仅导出指定类型：
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat --types maidata.txt,track.mp3
+```
+
+筛选规则：
 - 不传 `--id`：导出全部曲目
-- 传 `--id` 且不传 `--difficulty`：导出该 id 的全部难度
-- 同时传 `--id` 和 `--difficulty`：只导出该难度
+- 传 `--id` 且不传 `--difficulty`：导出命中 id 的全部难度
+- 同时传 `--id` 和 `--difficulty`：只导出命中 id 的命中难度
+- `--id` 和 `--difficulty` 支持逗号分隔多条件，每一项可为数字或正则
 - `--difficulty` 使用导出的 `maidata` 难度编号：普通谱通常是 `2..6`，宴谱是 `7`
 - `--resume`（`--skip-existing`）会跳过已存在完整导出的曲目；`_Incomplete` 曲目仍会继续尝试补全
+- `--types` 支持逗号分隔：
+  `maidata.txt` / `track.mp3` / `bg.png` / `pv.mp4`
+  （别名：`chart|ma2`、`audio|music`、`cover|jacket|bg`、`video|movie|pv`）
 
-`assets` 会自动从 `StreamingAssets` 及其一级子目录识别素材目录：
+目录识别：
 - 音频：`SoundData`
 - 封面：`AssetBundleImages`
 - 视频：`MovieData`
+- 如需覆盖自动探测，可手动指定：`--music`、`--cover`、`--video`
 
-如需覆盖自动探测，也可手动指定 `--music`、`--cover`、`--video`。
+`--dummy` 英文固定输出规范：
+- 开启方式：`--dummy`
+- 若缺少 `track.mp3`：按谱面时长生成静音 `track.mp3`
+- 若缺少 `pv.mp4` 且存在 `bg.png`：由 `bg.png` 生成单帧 `pv.mp4`
+- 若缺少 `pv.mp4` 且不存在 `bg.png`：生成单帧黑屏 `pv.mp4`
+
+固定标签：
+- `MISSING_AUDIO`：`track.mp3` 为 dummy 生成
+- `MISSING_VIDEO`：`pv.mp4` 为 dummy 生成
+- `SOURCE_BG_PNG`：dummy 视频来源于 `bg.png`
+- `BLACK_FRAME`：dummy 视频为黑帧
+
+机器可读双通道：
+- 进度行：`[dummy: <TAG>[,<TAG>...]]`
+- `Warnings`：`MAICONV_DUMMY:<musicId>:<TAG>`
 
 ### media
 
@@ -174,17 +204,21 @@ MP3 打包为 ACB+AWB：
 maiconv media audio --input /path/to/track.mp3 --output-acb ./track.acb --output-awb ./track.awb
 ```
 
-AB 封面转 PNG：
+AB 与图片互转：
 
 ```bash
 maiconv media cover --input /path/to/UI_Jacket_114514.ab --output ./bg.png
+maiconv media cover --input /path/to/bg.png --output ./bg.ab
 ```
 
-DAT/USM 转 MP4：
+DAT/USM/CRID 转 MP4：
 
 ```bash
 maiconv media video --input /path/to/114514.dat --output ./pv.mp4
 ```
+
+- VP9 IVF 流会转码为 H.264 MP4。
+- H.264 Annex-B / MPEG 流会先尝试流复制封装（`-c:v copy`），失败后再回退为 H.264 转码。
 
 MP4 转 DAT：
 
@@ -209,13 +243,15 @@ maiconv media video --input /path/to/pv.mp4 --output ./pv.dat
   - `UI_Jacket_*.png/.jpg/.jpeg`
   - `ui_jacket_*.png/.jpg/.jpeg/.ab`
   - `AssetBundleImages/jacket/ui_jacket_*.png/.jpg/.jpeg/.ab`
+  - `AssetBundleImages/jacket_s/ui_jacket_*_s.png/.jpg/.jpeg/.ab`
 - 视频输入候选：
-  - `{id}.mp4/.dat/.usm`
-  - `{non_dx_id}.mp4/.dat/.usm`
+  - `{id}.mp4/.dat/.usm/.crid`
+  - `{non_dx_id}.mp4/.dat/.usm/.crid`
+  - 同时会结合 `Music.xml` 中的 `movieName` / `cueName` id 做回退匹配
 
 ## Assets 导出目录结构
 
-assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
+assets 导出时每首歌必含 `maidata.txt`，媒体目标文件名为：
 
 ```text
 {id_title}/
@@ -225,18 +261,23 @@ assets 导出时每首歌必含 `maidata.txt`，媒体文件统一输出为：
   pv.mp4
 ```
 
+当源媒体缺失时，`track.mp3`/`bg.png`/`pv.mp4` 可能不存在（除非启用 `--dummy`）。
+
 当源素材是原版游戏格式时，`assets` 的转换策略如下：
 - `acb + awb -> track.mp3`（统一使用外部 `ffmpeg` 转码）
 - `ab -> bg.png`（内置 PNG 提取）
-- `dat/usm -> pv.mp4`
-  - 仅支持 VP9 流；VP9->H.264 转码使用外部 `ffmpeg`
-- `mp4 + template(dat/usm) -> pv.dat`
-  - 先转码为 VP9 IVF（外部 `ffmpeg`），再按模板 DAT/USM 的视频包结构回填并走逆向加密写回
-- `mp4 -> pv.dat`（无模板）
+- `dat/usm/crid -> pv.mp4`
+  - 先提取/解密 USM/CRID 内嵌视频流
+  - VP9 IVF 流会转码为 H.264 MP4
+  - H.264/MPEG 流会先尝试流复制封装，失败后回退为 H.264 转码
+  - 若提取/封装路径失败，MaiConv 会回退为对源文件直接执行 `ffmpeg` 转码
+- `mp4 -> pv.dat`
   - 先转码为 VP9 IVF（外部 `ffmpeg`），再由 MaiConv 内置 C++ 打包器生成 DAT（`@SFV` 分包 + 同步加密）
   - 要求环境中可用 `ffmpeg`（需支持 `libvpx-vp9` 编码）
 
-若转换失败，不再保留原始素材文件；该曲目会被标记为 `_Incomplete`（未使用 `--ignore` 时则直接失败），并将失败的源/目标路径写入 `_log.txt`。
+失败处理规则：
+- 若 `movieName` 为 `DEBUG_*`，缺失视频按可选资源处理
+- 其他媒体缺失或转换失败会将曲目标记为 `_Incomplete`（未加 `--ignore` 时命令直接失败）
 
 `assets --layout` 支持：
 - `flat`（默认）：`{output}/{id_title}`

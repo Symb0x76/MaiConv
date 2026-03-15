@@ -19,6 +19,7 @@ bool extract_unity_texture_bundle_to_png(const std::filesystem::path &ab_file,
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <mutex>
@@ -1984,172 +1985,283 @@ bool parse_acb_metadata(const std::filesystem::path &acb_path,
     }
   }
 
-  if (const auto it = tables.find("StreamAwb");
-      it != tables.end() && !it->second.rows.empty()) {
+  const auto stream_awb_it = tables.find("StreamAwb");
+  if (stream_awb_it != tables.end() && !stream_awb_it->second.rows.empty()) {
     const auto name =
-        utf_value_as_string(utf_find_cell(it->second, 0U, "Name"));
+        utf_value_as_string(utf_find_cell(stream_awb_it->second, 0U, "Name"));
     if (name.has_value()) {
       metadata_out.stream_awb_name = *name;
     }
   }
 
-  if (const auto it = tables.find("Waveform"); it != tables.end()) {
+  const auto find_table =
+      [&](const std::vector<const char *> &names) -> const UtfTable * {
+    for (const char *name : names) {
+      const auto it = tables.find(name);
+      if (it != tables.end()) {
+        return &it->second;
+      }
+    }
+    return nullptr;
+  };
+
+  const UtfTable *cue_table = find_table({"CueTable", "Cue"});
+  const UtfTable *synth_table = find_table({"SynthTable", "Synth"});
+  const UtfTable *sequence_table = find_table({"SequenceTable", "Sequence"});
+  const UtfTable *track_table = find_table({"TrackTable", "Track"});
+  const UtfTable *track_event_table =
+      find_table({"TrackEvent", "TrackEventTable"});
+  const UtfTable *waveform_table = find_table({"WaveformTable", "Waveform"});
+
+  const auto parse_be_u16_array =
+      [](const UtfValue *value) -> std::vector<uint16_t> {
+    std::vector<uint16_t> out;
+    if (value == nullptr || value->kind != UtfValueKind::kBinary) {
+      return out;
+    }
+
+    const auto &bytes = value->binary;
+    if (bytes.empty()) {
+      return out;
+    }
+
+    out.reserve(bytes.size() / 2U);
+    for (std::size_t pos = 0; pos + 1U < bytes.size(); pos += 2U) {
+      out.push_back(
+          read_u16_be(bytes.data() + static_cast<std::ptrdiff_t>(pos)));
+    }
+    return out;
+  };
+
+  const auto resolve_waveform_awb_id =
+      [&](uint32_t waveform_index,
+          bool streaming_only) -> std::optional<uint32_t> {
+    if (waveform_table == nullptr ||
+        waveform_index >= waveform_table->rows.size()) {
+      return std::nullopt;
+    }
+
+    const auto streaming_opt = utf_value_as_u64(
+        utf_find_cell(*waveform_table, waveform_index, "Streaming"));
+    const bool has_streaming = streaming_opt.has_value();
+    const bool is_streaming =
+        !has_streaming || (*streaming_opt != static_cast<uint64_t>(0U));
+    if (streaming_only && !is_streaming) {
+      return std::nullopt;
+    }
+
+    const auto stream_awb_id_opt = utf_value_as_u64(
+        utf_find_cell(*waveform_table, waveform_index, "StreamAwbId"));
+    const auto memory_awb_id_opt = utf_value_as_u64(
+        utf_find_cell(*waveform_table, waveform_index, "MemoryAwbId"));
+    std::optional<uint64_t> awb_id_opt;
+    if (stream_awb_id_opt.has_value() || memory_awb_id_opt.has_value()) {
+      if (!is_streaming && memory_awb_id_opt.has_value()) {
+        awb_id_opt = memory_awb_id_opt;
+      } else if (stream_awb_id_opt.has_value()) {
+        awb_id_opt = stream_awb_id_opt;
+      } else {
+        awb_id_opt = memory_awb_id_opt;
+      }
+    } else {
+      // Older ACB variants may only expose the AWB entry id as "Id".
+      awb_id_opt = utf_value_as_u64(
+          utf_find_cell(*waveform_table, waveform_index, "Id"));
+    }
+    if (!awb_id_opt.has_value() ||
+        *awb_id_opt > static_cast<uint64_t>(UINT32_MAX)) {
+      return std::nullopt;
+    }
+    const uint32_t awb_id = static_cast<uint32_t>(*awb_id_opt);
+    if (awb_id == 0xFFFFFFFFU || awb_id == 0x0000FFFFU) {
+      return std::nullopt;
+    }
+
+    return awb_id;
+  };
+
+  constexpr uint16_t kRefWaveform = 1U;
+  constexpr uint16_t kRefSynth = 2U;
+  constexpr uint16_t kRefSequence = 3U;
+  constexpr uint16_t kRefNullIndex = 0xFFFFU;
+  constexpr uint16_t kCmdReferenceItem = 0x07D0U;
+  constexpr uint16_t kCmdReferenceItem2 = 0x07D3U;
+
+  std::vector<uint32_t> cue0_awb_ids;
+  std::set<uint32_t> cue0_unique_ids;
+  std::set<uint32_t> visited_synth;
+  std::set<uint32_t> visited_sequence;
+  std::set<uint32_t> visited_track;
+  std::set<uint32_t> visited_track_event;
+
+  std::function<void(uint16_t, uint16_t)> resolve_reference;
+  std::function<void(uint16_t)> resolve_synth;
+  std::function<void(uint16_t)> resolve_sequence;
+  std::function<void(uint16_t)> resolve_track;
+  std::function<void(uint16_t)> resolve_track_event;
+
+  resolve_reference = [&](uint16_t ref_type, uint16_t ref_index) {
+    if (ref_index == kRefNullIndex) {
+      return;
+    }
+
+    switch (ref_type) {
+    case kRefWaveform: {
+      const auto awb_id =
+          resolve_waveform_awb_id(static_cast<uint32_t>(ref_index), false);
+      if (awb_id.has_value() && cue0_unique_ids.insert(*awb_id).second) {
+        cue0_awb_ids.push_back(*awb_id);
+      }
+      break;
+    }
+    case kRefSynth:
+      resolve_synth(ref_index);
+      break;
+    case kRefSequence:
+      resolve_sequence(ref_index);
+      break;
+    default:
+      break;
+    }
+  };
+
+  resolve_synth = [&](uint16_t synth_index) {
+    if (synth_table == nullptr || synth_index >= synth_table->rows.size()) {
+      return;
+    }
+    if (!visited_synth.insert(synth_index).second) {
+      return;
+    }
+
+    const auto ref_items = parse_be_u16_array(
+        utf_find_cell(*synth_table, synth_index, "ReferenceItems"));
+    for (std::size_t i = 0; i + 1U < ref_items.size(); i += 2U) {
+      resolve_reference(ref_items[i], ref_items[i + 1U]);
+    }
+  };
+
+  resolve_track_event = [&](uint16_t track_event_index) {
+    if (track_event_table == nullptr ||
+        track_event_index >= track_event_table->rows.size()) {
+      return;
+    }
+    if (!visited_track_event.insert(track_event_index).second) {
+      return;
+    }
+
+    const UtfValue *command_value =
+        utf_find_cell(*track_event_table, track_event_index, "Command");
+    if (command_value == nullptr ||
+        command_value->kind != UtfValueKind::kBinary) {
+      return;
+    }
+
+    const auto &commands = command_value->binary;
+    for (std::size_t pos = 0; pos + 3U <= commands.size();) {
+      const uint16_t command_type =
+          read_u16_be(commands.data() + static_cast<std::ptrdiff_t>(pos));
+      const uint8_t param_size = commands[pos + 2U];
+      pos += 3U;
+
+      if (pos + static_cast<std::size_t>(param_size) > commands.size()) {
+        break;
+      }
+
+      if ((command_type == kCmdReferenceItem ||
+           command_type == kCmdReferenceItem2) &&
+          param_size >= 4U) {
+        const uint16_t ref_type =
+            read_u16_be(commands.data() + static_cast<std::ptrdiff_t>(pos));
+        const uint16_t ref_index = read_u16_be(
+            commands.data() + static_cast<std::ptrdiff_t>(pos + 2U));
+        resolve_reference(ref_type, ref_index);
+      }
+
+      pos += static_cast<std::size_t>(param_size);
+    }
+  };
+
+  resolve_track = [&](uint16_t track_index) {
+    if (track_table == nullptr || track_index >= track_table->rows.size()) {
+      return;
+    }
+    if (!visited_track.insert(track_index).second) {
+      return;
+    }
+
+    const auto event_index_opt = utf_value_as_u64(
+        utf_find_cell(*track_table, track_index, "EventIndex"));
+    if (!event_index_opt.has_value() ||
+        *event_index_opt > static_cast<uint64_t>(UINT16_MAX) ||
+        *event_index_opt == static_cast<uint64_t>(kRefNullIndex)) {
+      return;
+    }
+
+    resolve_track_event(static_cast<uint16_t>(*event_index_opt));
+  };
+
+  resolve_sequence = [&](uint16_t sequence_index) {
+    if (sequence_table == nullptr ||
+        sequence_index >= sequence_table->rows.size()) {
+      return;
+    }
+    if (!visited_sequence.insert(sequence_index).second) {
+      return;
+    }
+
+    const auto track_indices = parse_be_u16_array(
+        utf_find_cell(*sequence_table, sequence_index, "TrackIndex"));
+    if (track_indices.empty()) {
+      return;
+    }
+
+    std::size_t track_count = track_indices.size();
+    const auto num_tracks_opt = utf_value_as_u64(
+        utf_find_cell(*sequence_table, sequence_index, "NumTracks"));
+    if (num_tracks_opt.has_value() &&
+        *num_tracks_opt < static_cast<uint64_t>(track_count)) {
+      track_count = static_cast<std::size_t>(*num_tracks_opt);
+    }
+
+    for (std::size_t i = 0; i < track_count; ++i) {
+      resolve_track(track_indices[i]);
+    }
+  };
+
+  if (cue_table != nullptr && !cue_table->rows.empty()) {
+    const auto cue_ref_type_opt =
+        utf_value_as_u64(utf_find_cell(*cue_table, 0U, "ReferenceType"));
+    const auto cue_ref_index_opt =
+        utf_value_as_u64(utf_find_cell(*cue_table, 0U, "ReferenceIndex"));
+    if (cue_ref_type_opt.has_value() && cue_ref_index_opt.has_value() &&
+        *cue_ref_type_opt <= static_cast<uint64_t>(UINT16_MAX) &&
+        *cue_ref_index_opt <= static_cast<uint64_t>(UINT16_MAX)) {
+      resolve_reference(static_cast<uint16_t>(*cue_ref_type_opt),
+                        static_cast<uint16_t>(*cue_ref_index_opt));
+    }
+  }
+
+  if (!cue0_awb_ids.empty()) {
+    metadata_out.stream_awb_ids = std::move(cue0_awb_ids);
+    return true;
+  }
+
+  // Fallback for ACB variants where cue traversal is not available.
+  if (waveform_table != nullptr) {
     std::set<uint32_t> unique_ids;
-    for (std::size_t row = 0; row < it->second.rows.size(); ++row) {
-      const auto stream_awb_id_opt =
-          utf_value_as_u64(utf_find_cell(it->second, row, "StreamAwbId"));
-      if (!stream_awb_id_opt.has_value() ||
-          *stream_awb_id_opt > std::numeric_limits<uint32_t>::max()) {
+    for (std::size_t row = 0; row < waveform_table->rows.size(); ++row) {
+      const auto awb_id =
+          resolve_waveform_awb_id(static_cast<uint32_t>(row), true);
+      if (!awb_id.has_value()) {
         continue;
       }
-
-      bool include = true;
-      if (const auto streaming_opt =
-              utf_value_as_u64(utf_find_cell(it->second, row, "Streaming"));
-          streaming_opt.has_value()) {
-        include = (*streaming_opt != 0U);
-      }
-      if (!include) {
-        continue;
-      }
-
-      const uint32_t id = static_cast<uint32_t>(*stream_awb_id_opt);
-      if (unique_ids.insert(id).second) {
-        metadata_out.stream_awb_ids.push_back(id);
+      if (unique_ids.insert(*awb_id).second) {
+        metadata_out.stream_awb_ids.push_back(*awb_id);
       }
     }
   }
 
   return true;
-}
-
-struct UsmVideoPayloadChunk {
-  std::size_t payload_begin = 0;
-  std::size_t payload_size = 0;
-  std::vector<uint8_t> decoded_payload;
-};
-
-bool patch_template_dat_video_payloads(
-    const std::filesystem::path &template_dat,
-    const std::vector<uint8_t> &new_vp9_ivf,
-    const std::filesystem::path &target_dat) {
-  std::vector<uint8_t> bytes;
-  if (!read_binary_file(template_dat, bytes) || bytes.size() < 0x20) {
-    return false;
-  }
-
-  constexpr std::array<uint8_t, 4> kSfv = {
-      static_cast<uint8_t>('@'), static_cast<uint8_t>('S'),
-      static_cast<uint8_t>('F'), static_cast<uint8_t>('V')};
-  constexpr uint64_t kUsmKey = 0x7F4551499DF55E68ULL;
-  const UsmKeys keys = make_usm_keys(kUsmKey);
-
-  struct ChannelPack {
-    std::vector<UsmVideoPayloadChunk> chunks;
-    std::vector<uint8_t> concatenated;
-  };
-  std::array<ChannelPack, 256> channels{};
-
-  std::size_t pos = 0;
-  while (pos + 0x20 <= bytes.size()) {
-    const uint8_t *header = bytes.data() + static_cast<std::ptrdiff_t>(pos);
-    const uint32_t chunk_size_after_header = read_u32_be(header + 4);
-    const uint32_t payload_offset = header[9];
-    const uint32_t padding_size = read_u16_be(header + 10);
-    const uint8_t channel_number = header[12];
-    const uint8_t payload_type = static_cast<uint8_t>(header[15] & 0x03U);
-
-    const std::size_t chunk_total_size =
-        0x20U + static_cast<std::size_t>(chunk_size_after_header);
-    if (chunk_total_size == 0 || pos + chunk_total_size > bytes.size()) {
-      return false;
-    }
-    if (chunk_size_after_header < payload_offset + padding_size) {
-      return false;
-    }
-
-    const std::size_t payload_size = static_cast<std::size_t>(
-        chunk_size_after_header - payload_offset - padding_size);
-    const std::size_t extra_offset =
-        payload_offset > 0x18U
-            ? static_cast<std::size_t>(payload_offset - 0x18U)
-            : 0U;
-    const std::size_t payload_begin = pos + 0x20U + extra_offset;
-    if (payload_begin + payload_size > bytes.size()) {
-      return false;
-    }
-
-    if (payload_type == 0U && payload_size > 0 &&
-        std::equal(kSfv.begin(), kSfv.end(), header)) {
-      std::vector<uint8_t> payload(payload_size);
-      std::copy(bytes.begin() + static_cast<std::ptrdiff_t>(payload_begin),
-                bytes.begin() +
-                    static_cast<std::ptrdiff_t>(payload_begin + payload_size),
-                payload.begin());
-      std::vector<uint8_t> decoded =
-          decrypt_usm_video_packet(payload, keys.video);
-
-      UsmVideoPayloadChunk chunk;
-      chunk.payload_begin = payload_begin;
-      chunk.payload_size = payload_size;
-      chunk.decoded_payload = std::move(decoded);
-
-      auto &channel = channels[channel_number];
-      channel.concatenated.insert(channel.concatenated.end(),
-                                  chunk.decoded_payload.begin(),
-                                  chunk.decoded_payload.end());
-      channel.chunks.push_back(std::move(chunk));
-    }
-
-    pos += chunk_total_size;
-  }
-
-  int selected_channel = -1;
-  for (int c = 0; c < 256; ++c) {
-    if (!channels[static_cast<std::size_t>(c)].chunks.empty() &&
-        is_vp9_ivf_stream(channels[static_cast<std::size_t>(c)].concatenated)) {
-      selected_channel = c;
-      break;
-    }
-  }
-  if (selected_channel < 0) {
-    return false;
-  }
-
-  auto &target_channel = channels[static_cast<std::size_t>(selected_channel)];
-  std::size_t capacity = 0;
-  for (const auto &chunk : target_channel.chunks) {
-    capacity += chunk.payload_size;
-  }
-  if (new_vp9_ivf.size() > capacity) {
-    return false;
-  }
-
-  std::size_t cursor = 0;
-  for (auto &chunk : target_channel.chunks) {
-    std::vector<uint8_t> plain(chunk.payload_size, 0U);
-    const std::size_t n =
-        std::min(chunk.payload_size, new_vp9_ivf.size() - cursor);
-    if (n > 0) {
-      std::copy(new_vp9_ivf.begin() + static_cast<std::ptrdiff_t>(cursor),
-                new_vp9_ivf.begin() + static_cast<std::ptrdiff_t>(cursor + n),
-                plain.begin());
-      cursor += n;
-    }
-    std::vector<uint8_t> encrypted =
-        encrypt_usm_video_packet(plain, keys.video);
-    if (encrypted.size() != chunk.payload_size) {
-      return false;
-    }
-    std::copy(encrypted.begin(), encrypted.end(),
-              bytes.begin() + static_cast<std::ptrdiff_t>(chunk.payload_begin));
-  }
-
-  if (cursor != new_vp9_ivf.size()) {
-    return false;
-  }
-
-  return write_binary_file(target_dat, bytes);
 }
 
 bool build_minimal_dat_from_vp9_ivf(const std::vector<uint8_t> &vp9_ivf,
@@ -2168,8 +2280,9 @@ bool build_minimal_dat_from_vp9_ivf(const std::vector<uint8_t> &vp9_ivf,
 
   std::size_t cursor = 0;
   while (cursor < vp9_ivf.size()) {
+    const std::size_t remaining = vp9_ivf.size() - cursor;
     const std::size_t payload_size =
-        std::min(kPayloadChunkSize, vp9_ivf.size() - cursor);
+        remaining < kPayloadChunkSize ? remaining : kPayloadChunkSize;
     std::vector<uint8_t> plain(payload_size);
     std::copy(vp9_ivf.begin() + static_cast<std::ptrdiff_t>(cursor),
               vp9_ivf.begin() +
@@ -2326,7 +2439,8 @@ struct Afs2Entry {
 };
 
 bool parse_afs2_entries(const std::vector<uint8_t> &awb_bytes,
-                        std::vector<Afs2Entry> &out_entries) {
+                        std::vector<Afs2Entry> &out_entries,
+                        uint16_t *subkey_out = nullptr) {
   out_entries.clear();
   if (awb_bytes.size() < 16U) {
     return false;
@@ -2338,11 +2452,18 @@ bool parse_afs2_entries(const std::vector<uint8_t> &awb_bytes,
     return false;
   }
 
-  const uint8_t offset_size = awb_bytes[5];
+  // AFS2 variants seen in the wild:
+  // 1) alignment as uint32 at 0x0C.
+  // 2) legacy layout: alignment as uint16 at 0x0C + HCA subkey at 0x0E.
+  // Parse both and choose the one that yields more recognizable entries.
+  const uint8_t pointer_size = awb_bytes[5];
   const uint8_t id_size = awb_bytes[6];
   if (!(id_size == 1U || id_size == 2U || id_size == 4U) ||
-      !(offset_size == 2U || offset_size == 4U || offset_size == 8U)) {
+      !(pointer_size == 2U || pointer_size == 4U || pointer_size == 8U)) {
     return false;
+  }
+  if (subkey_out != nullptr) {
+    *subkey_out = 0U;
   }
 
   const uint32_t entry_count_u32 = read_u32_le(awb_bytes.data() + 8);
@@ -2350,93 +2471,176 @@ bool parse_afs2_entries(const std::vector<uint8_t> &awb_bytes,
     return false;
   }
   const std::size_t entry_count = static_cast<std::size_t>(entry_count_u32);
-  if (entry_count >
-      std::numeric_limits<std::size_t>::max() / static_cast<std::size_t>(2U)) {
-    return false;
-  }
+  const uint32_t alignment_u32 = read_u32_le(awb_bytes.data() + 12);
+  const uint16_t alignment_u16 = read_u16_le(awb_bytes.data() + 12);
+  const uint16_t header_subkey = read_u16_le(awb_bytes.data() + 14);
 
-  const std::size_t align = std::max<std::size_t>(
-      1U, static_cast<std::size_t>(read_u16_le(awb_bytes.data() + 12)));
-
-  if (entry_count > std::numeric_limits<std::size_t>::max() /
-                        static_cast<std::size_t>(id_size)) {
+  const std::size_t id_size_bytes = static_cast<std::size_t>(id_size);
+  if (entry_count > (SIZE_MAX / id_size_bytes)) {
     return false;
   }
-  const std::size_t id_table_size =
-      entry_count * static_cast<std::size_t>(id_size);
-  const std::size_t offset_count = entry_count + 1U;
-  if (offset_count > std::numeric_limits<std::size_t>::max() /
-                         static_cast<std::size_t>(offset_size)) {
-    return false;
-  }
-  const std::size_t offset_table_size =
-      offset_count * static_cast<std::size_t>(offset_size);
+  const std::size_t id_table_size = entry_count * id_size_bytes;
   const std::size_t id_table_begin = 16U;
-  const std::size_t offset_table_begin = id_table_begin + id_table_size;
-  if (offset_table_begin > awb_bytes.size() ||
-      offset_table_size > awb_bytes.size() - offset_table_begin) {
+  const std::size_t pointer_table_begin = id_table_begin + id_table_size;
+
+  const std::size_t pointer_count = entry_count + 1U;
+  if (pointer_count > (SIZE_MAX / static_cast<std::size_t>(pointer_size))) {
+    return false;
+  }
+  const std::size_t pointer_table_size =
+      pointer_count * static_cast<std::size_t>(pointer_size);
+  if (pointer_table_begin > awb_bytes.size() ||
+      pointer_table_size > awb_bytes.size() - pointer_table_begin) {
     return false;
   }
 
   std::vector<uint32_t> ids;
   ids.reserve(entry_count);
   for (std::size_t i = 0; i < entry_count; ++i) {
-    const std::size_t pos =
-        id_table_begin + i * static_cast<std::size_t>(id_size);
+    const std::size_t pos = id_table_begin + i * id_size_bytes;
     const uint8_t *p = awb_bytes.data() + static_cast<std::ptrdiff_t>(pos);
     uint32_t id = 0U;
     if (id_size == 1U) {
-      id = p[0];
+      id = static_cast<uint32_t>(p[0]);
     } else if (id_size == 2U) {
-      id = read_u16_le(p);
+      id = static_cast<uint32_t>(read_u16_le(p));
     } else {
       id = read_u32_le(p);
     }
     ids.push_back(id);
   }
 
-  std::vector<uint64_t> offsets;
-  offsets.reserve(offset_count);
-  for (std::size_t i = 0; i < offset_count; ++i) {
+  std::vector<uint64_t> pointers;
+  pointers.reserve(pointer_count);
+  for (std::size_t i = 0; i < pointer_count; ++i) {
     const std::size_t pos =
-        offset_table_begin + i * static_cast<std::size_t>(offset_size);
+        pointer_table_begin + i * static_cast<std::size_t>(pointer_size);
     const uint8_t *p = awb_bytes.data() + static_cast<std::ptrdiff_t>(pos);
     uint64_t value = 0;
-    if (offset_size == 2U) {
+    if (pointer_size == 2U) {
       value = static_cast<uint64_t>(read_u16_le(p));
-    } else if (offset_size == 4U) {
+    } else if (pointer_size == 4U) {
       value = static_cast<uint64_t>(read_u32_le(p));
     } else {
       value = read_u64_le(p);
     }
-    offsets.push_back(value);
+    pointers.push_back(value);
   }
 
-  const uint64_t max_size = static_cast<uint64_t>(awb_bytes.size());
-  for (std::size_t i = 0; i < entry_count; ++i) {
-    const uint64_t begin_raw = offsets[i];
-    const uint64_t end_raw = offsets[i + 1U];
-    if (end_raw <= begin_raw || end_raw > max_size) {
-      continue;
+  const uint64_t file_size_u64 = static_cast<uint64_t>(awb_bytes.size());
+  const auto looks_like_audio_entry = [&](std::size_t begin) -> bool {
+    if (begin >= awb_bytes.size()) {
+      return false;
     }
-
-    uint64_t begin_aligned = begin_raw;
-    if (align > 1U) {
-      const uint64_t align_u64 = static_cast<uint64_t>(align);
-      const uint64_t rem = begin_raw % align_u64;
-      if (rem != 0U) {
-        begin_aligned += align_u64 - rem;
-      }
+    const auto normalize_hca_char = [](uint8_t value) -> char {
+      return static_cast<char>(value & 0x7FU);
+    };
+    const std::size_t remain = awb_bytes.size() - begin;
+    const bool is_hca = remain >= 4U &&
+                        normalize_hca_char(awb_bytes[begin]) == 'H' &&
+                        normalize_hca_char(awb_bytes[begin + 1U]) == 'C' &&
+                        normalize_hca_char(awb_bytes[begin + 2U]) == 'A' &&
+                        awb_bytes[begin + 3U] == 0x00U;
+    const bool is_ehca = remain >= 4U &&
+                         normalize_hca_char(awb_bytes[begin]) == 'E' &&
+                         normalize_hca_char(awb_bytes[begin + 1U]) == 'H' &&
+                         normalize_hca_char(awb_bytes[begin + 2U]) == 'C' &&
+                         normalize_hca_char(awb_bytes[begin + 3U]) == 'A';
+    if (is_hca || is_ehca) {
+      return true;
     }
-    if (begin_aligned >= end_raw || begin_aligned > max_size) {
-      continue;
+    if (remain >= 7U && awb_bytes[begin] == 0x80U &&
+        awb_bytes[begin + 1U] == 0x00U &&
+        awb_bytes[begin + 4U] == static_cast<uint8_t>('A') &&
+        awb_bytes[begin + 5U] == static_cast<uint8_t>('D') &&
+        awb_bytes[begin + 6U] == static_cast<uint8_t>('X')) {
+      return true;
     }
-
-    out_entries.push_back({ids[i], static_cast<std::size_t>(begin_aligned),
-                           static_cast<std::size_t>(end_raw)});
-  }
-  if (out_entries.empty()) {
     return false;
+  };
+
+  struct Afs2ParseCandidate {
+    std::vector<Afs2Entry> entries;
+    uint16_t subkey = 0U;
+    std::size_t recognized_count = 0U;
+  };
+  const auto build_candidate =
+      [&](uint64_t alignment, uint16_t subkey,
+          bool align_end_for_non_last) -> Afs2ParseCandidate {
+    Afs2ParseCandidate candidate;
+    candidate.subkey = subkey;
+    const uint64_t effective_alignment = alignment == 0U ? 1U : alignment;
+
+    const auto align_up = [&](uint64_t value) -> uint64_t {
+      if (effective_alignment <= 1U) {
+        return value;
+      }
+      const uint64_t rem = value % effective_alignment;
+      return rem == 0U ? value : (value + (effective_alignment - rem));
+    };
+
+    for (std::size_t i = 0; i < entry_count; ++i) {
+      const uint64_t begin = align_up(pointers[i]);
+      uint64_t end = pointers[i + 1U];
+      if (align_end_for_non_last && i + 1U < entry_count) {
+        end = align_up(end);
+      }
+      if (end <= begin || end > file_size_u64) {
+        continue;
+      }
+      const std::size_t begin_pos = static_cast<std::size_t>(begin);
+      if (looks_like_audio_entry(begin_pos)) {
+        candidate.recognized_count += 1U;
+      }
+      candidate.entries.push_back(
+          {ids[i], begin_pos, static_cast<std::size_t>(end)});
+    }
+    return candidate;
+  };
+
+  std::vector<Afs2ParseCandidate> candidates;
+  candidates.reserve(4);
+  candidates.push_back(
+      build_candidate(static_cast<uint64_t>(alignment_u32), 0U, false));
+  candidates.push_back(
+      build_candidate(static_cast<uint64_t>(alignment_u32), 0U, true));
+  if (alignment_u16 > 0U &&
+      (header_subkey != 0U || alignment_u32 > 0xFFFFU ||
+       alignment_u16 != static_cast<uint16_t>(alignment_u32))) {
+    candidates.push_back(build_candidate(static_cast<uint64_t>(alignment_u16),
+                                         header_subkey, false));
+    candidates.push_back(build_candidate(static_cast<uint64_t>(alignment_u16),
+                                         header_subkey, true));
+  }
+
+  const auto better_than = [](const Afs2ParseCandidate &lhs,
+                              const Afs2ParseCandidate &rhs) {
+    if (lhs.recognized_count != rhs.recognized_count) {
+      return lhs.recognized_count > rhs.recognized_count;
+    }
+    if (lhs.entries.size() != rhs.entries.size()) {
+      return lhs.entries.size() > rhs.entries.size();
+    }
+    // Keep non-zero subkey candidate when parse quality ties.
+    if (lhs.subkey != rhs.subkey) {
+      return lhs.subkey != 0U;
+    }
+    return false;
+  };
+
+  const Afs2ParseCandidate *best = nullptr;
+  for (const auto &candidate : candidates) {
+    if (best == nullptr || better_than(candidate, *best)) {
+      best = &candidate;
+    }
+  }
+  if (best == nullptr || best->entries.empty()) {
+    return false;
+  }
+
+  out_entries = best->entries;
+  if (subkey_out != nullptr) {
+    *subkey_out = best->subkey;
   }
   return true;
 }
@@ -2460,10 +2664,29 @@ bool transcode_audio_file_to_mp3_ffmpeg(const std::filesystem::path &source,
   return ok && file_non_empty(target_mp3);
 }
 
+struct HcaDecodeOptions {
+  bool enabled = false;
+  uint32_t low_key = 0U;
+  uint32_t high_key = 0U;
+  uint16_t sub_key = 0U;
+};
+
+HcaDecodeOptions make_default_hca_decode_options(uint16_t sub_key) {
+  // Match MaiChartManager's HCA key for game audio export.
+  constexpr uint64_t kMaiHcaKey = 0x7F4551499DF55E68ULL;
+  HcaDecodeOptions out;
+  out.enabled = true;
+  out.low_key = static_cast<uint32_t>(kMaiHcaKey & 0xFFFFFFFFULL);
+  out.high_key = static_cast<uint32_t>((kMaiHcaKey >> 32U) & 0xFFFFFFFFULL);
+  out.sub_key = sub_key;
+  return out;
+}
+
 bool transcode_audio_stdin_to_mp3_ffmpeg(
     const std::vector<uint8_t> &payload,
     const std::filesystem::path &target_mp3, const std::string &encoder,
-    const std::optional<std::string> &force_format) {
+    const std::optional<std::string> &force_format,
+    const HcaDecodeOptions *hca_decode_options = nullptr) {
   if (payload.empty()) {
     return false;
   }
@@ -2474,6 +2697,15 @@ bool transcode_audio_stdin_to_mp3_ffmpeg(
   if (force_format.has_value()) {
     args.push_back(L"-f");
     args.push_back(widen_ascii(*force_format));
+    if (*force_format == "hca" && hca_decode_options != nullptr &&
+        hca_decode_options->enabled) {
+      args.push_back(L"-hca_lowkey");
+      args.push_back(std::to_wstring(hca_decode_options->low_key));
+      args.push_back(L"-hca_highkey");
+      args.push_back(std::to_wstring(hca_decode_options->high_key));
+      args.push_back(L"-hca_subkey");
+      args.push_back(std::to_wstring(hca_decode_options->sub_key));
+    }
   }
   args.insert(args.end(), {L"-i", L"pipe:0", L"-vn", L"-c:a",
                            widen_ascii(encoder), target_mp3.wstring()});
@@ -2484,12 +2716,186 @@ bool transcode_audio_stdin_to_mp3_ffmpeg(
   if (force_format.has_value()) {
     args.push_back("-f");
     args.push_back(*force_format);
+    if (*force_format == "hca" && hca_decode_options != nullptr &&
+        hca_decode_options->enabled) {
+      args.push_back("-hca_lowkey");
+      args.push_back(std::to_string(hca_decode_options->low_key));
+      args.push_back("-hca_highkey");
+      args.push_back(std::to_string(hca_decode_options->high_key));
+      args.push_back("-hca_subkey");
+      args.push_back(std::to_string(hca_decode_options->sub_key));
+    }
   }
   args.insert(args.end(), {"-i", "pipe:0", "-vn", "-c:a", encoder,
                            path_to_utf8(target_mp3)});
   const bool ok = run_ffmpeg_feed_stdin(args, payload);
 #endif
   return ok && file_non_empty(target_mp3);
+}
+
+enum class AudioPayloadFormat {
+  kUnknown = 0,
+  kHca,
+  kAdx,
+};
+
+char normalize_hca_chunk_char(uint8_t value) {
+  return static_cast<char>(value & 0x7FU);
+}
+
+bool is_hca_or_ehca_signature_at(const std::vector<uint8_t> &bytes,
+                                 std::size_t begin,
+                                 bool *is_ehca_out = nullptr) {
+  if (begin + 4U > bytes.size()) {
+    return false;
+  }
+  const bool is_hca = normalize_hca_chunk_char(bytes[begin]) == 'H' &&
+                      normalize_hca_chunk_char(bytes[begin + 1U]) == 'C' &&
+                      normalize_hca_chunk_char(bytes[begin + 2U]) == 'A' &&
+                      bytes[begin + 3U] == 0x00U;
+  const bool is_ehca = normalize_hca_chunk_char(bytes[begin]) == 'E' &&
+                       normalize_hca_chunk_char(bytes[begin + 1U]) == 'H' &&
+                       normalize_hca_chunk_char(bytes[begin + 2U]) == 'C' &&
+                       normalize_hca_chunk_char(bytes[begin + 3U]) == 'A';
+  if (is_ehca_out != nullptr) {
+    *is_ehca_out = is_ehca;
+  }
+  return is_hca || is_ehca;
+}
+
+AudioPayloadFormat
+detect_audio_payload_format_at(const std::vector<uint8_t> &bytes,
+                               std::size_t begin);
+
+AudioPayloadFormat
+detect_audio_payload_format(const std::vector<uint8_t> &payload) {
+  return detect_audio_payload_format_at(payload, 0U);
+}
+
+std::optional<uint16_t>
+detect_hca_encryption_type(const std::vector<uint8_t> &payload) {
+  if (payload.size() < 8U) {
+    return std::nullopt;
+  }
+
+  bool is_ehca = false;
+  if (!is_hca_or_ehca_signature_at(payload, 0U, &is_ehca)) {
+    return std::nullopt;
+  }
+
+  const uint16_t header_size = read_u16_be(payload.data() + 6);
+  if (header_size < 8U ||
+      static_cast<std::size_t>(header_size) > payload.size()) {
+    return std::nullopt;
+  }
+
+  const std::size_t limit = static_cast<std::size_t>(header_size);
+  for (std::size_t pos = 8U; pos + 6U <= limit; ++pos) {
+    if (normalize_hca_chunk_char(payload[pos]) != 'c' ||
+        normalize_hca_chunk_char(payload[pos + 1U]) != 'i' ||
+        normalize_hca_chunk_char(payload[pos + 2U]) != 'p' ||
+        normalize_hca_chunk_char(payload[pos + 3U]) != 'h') {
+      continue;
+    }
+    return read_u16_be(payload.data() + static_cast<std::ptrdiff_t>(pos + 4U));
+  }
+
+  // For classic HCA, missing "ciph" means encryption type 0.
+  // For EHCA, treat missing "ciph" as unknown and keep keyed fallback enabled.
+  if (is_ehca) {
+    return std::nullopt;
+  }
+  return static_cast<uint16_t>(0U);
+}
+
+std::vector<std::optional<std::string>>
+build_awb_entry_demuxer_candidates(const std::vector<uint8_t> &payload) {
+  std::vector<std::optional<std::string>> candidates;
+  switch (detect_audio_payload_format(payload)) {
+  case AudioPayloadFormat::kHca:
+    candidates.emplace_back(std::string("hca"));
+    break;
+  case AudioPayloadFormat::kAdx:
+    candidates.emplace_back(std::string("adx"));
+    break;
+  case AudioPayloadFormat::kUnknown:
+    break;
+  }
+
+  return candidates;
+}
+
+AudioPayloadFormat
+detect_audio_payload_format_at(const std::vector<uint8_t> &bytes,
+                               std::size_t begin) {
+  if (begin >= bytes.size()) {
+    return AudioPayloadFormat::kUnknown;
+  }
+
+  const std::size_t remain = bytes.size() - begin;
+  if (remain >= 4U && is_hca_or_ehca_signature_at(bytes, begin)) {
+    return AudioPayloadFormat::kHca;
+  }
+
+  if (remain >= 7U && bytes[begin] == static_cast<uint8_t>(0x80U) &&
+      bytes[begin + 1U] == static_cast<uint8_t>(0x00U) &&
+      bytes[begin + 4U] == static_cast<uint8_t>('A') &&
+      bytes[begin + 5U] == static_cast<uint8_t>('D') &&
+      bytes[begin + 6U] == static_cast<uint8_t>('X')) {
+    return AudioPayloadFormat::kAdx;
+  }
+
+  return AudioPayloadFormat::kUnknown;
+}
+
+bool scan_embedded_audio_entries(const std::vector<uint8_t> &awb_bytes,
+                                 std::vector<Afs2Entry> &out_entries) {
+  out_entries.clear();
+  if (awb_bytes.size() < 8U) {
+    return false;
+  }
+
+  std::vector<std::size_t> starts;
+  starts.reserve(16);
+  for (std::size_t pos = 0; pos + 4U <= awb_bytes.size(); ++pos) {
+    const AudioPayloadFormat format =
+        detect_audio_payload_format_at(awb_bytes, pos);
+    if (format == AudioPayloadFormat::kUnknown) {
+      continue;
+    }
+    if (!starts.empty() && pos <= starts.back() + 4U) {
+      continue;
+    }
+    starts.push_back(pos);
+  }
+  if (starts.empty()) {
+    return false;
+  }
+
+  for (std::size_t i = 0; i < starts.size(); ++i) {
+    const std::size_t begin = starts[i];
+    const std::size_t end =
+        (i + 1U < starts.size()) ? starts[i + 1U] : awb_bytes.size();
+    if (end <= begin) {
+      continue;
+    }
+    out_entries.push_back({static_cast<uint32_t>(i),
+                           static_cast<std::size_t>(begin),
+                           static_cast<std::size_t>(end)});
+  }
+  if (out_entries.empty()) {
+    return false;
+  }
+
+  std::stable_sort(out_entries.begin(), out_entries.end(),
+                   [](const Afs2Entry &lhs, const Afs2Entry &rhs) {
+                     return (lhs.end - lhs.begin) > (rhs.end - rhs.begin);
+                   });
+  constexpr std::size_t kMaxScanEntries = 64U;
+  if (out_entries.size() > kMaxScanEntries) {
+    out_entries.resize(kMaxScanEntries);
+  }
+  return true;
 }
 
 bool transcode_awb_afs2_to_mp3_ffmpeg(
@@ -2506,16 +2912,27 @@ bool transcode_awb_afs2_to_mp3_ffmpeg(
     return false;
   }
 
+  uint16_t awb_subkey = 0U;
   std::vector<Afs2Entry> entries;
-  if (!parse_afs2_entries(awb_bytes, entries)) {
+  bool parsed_afs2 = parse_afs2_entries(awb_bytes, entries, &awb_subkey);
+  if (!parsed_afs2 && entries.empty() &&
+      !scan_embedded_audio_entries(awb_bytes, entries)) {
     return false;
+  }
+  std::vector<HcaDecodeOptions> hca_decode_options_candidates;
+  hca_decode_options_candidates.push_back(
+      make_default_hca_decode_options(awb_subkey));
+  if (awb_subkey != 0U) {
+    hca_decode_options_candidates.push_back(
+        make_default_hca_decode_options(0U));
   }
 
   std::vector<Afs2Entry> candidates;
   candidates.reserve(entries.size());
 
   std::vector<bool> used(entries.size(), false);
-  if (preferred_entry_ids != nullptr && !preferred_entry_ids->empty()) {
+  if (parsed_afs2 && preferred_entry_ids != nullptr &&
+      !preferred_entry_ids->empty()) {
     for (const uint32_t wanted_id : *preferred_entry_ids) {
       for (std::size_t i = 0; i < entries.size(); ++i) {
         if (!used[i] && entries[i].id == wanted_id) {
@@ -2525,6 +2942,7 @@ bool transcode_awb_afs2_to_mp3_ffmpeg(
       }
     }
   }
+  const bool has_preferred_candidates = !candidates.empty();
 
   std::vector<Afs2Entry> remaining;
   remaining.reserve(entries.size());
@@ -2533,13 +2951,14 @@ bool transcode_awb_afs2_to_mp3_ffmpeg(
       remaining.push_back(entries[i]);
     }
   }
-  std::stable_sort(remaining.begin(), remaining.end(),
-                   [](const Afs2Entry &lhs, const Afs2Entry &rhs) {
-                     return (lhs.end - lhs.begin) > (rhs.end - rhs.begin);
-                   });
-  candidates.insert(candidates.end(), remaining.begin(), remaining.end());
+  if (!has_preferred_candidates) {
+    std::stable_sort(remaining.begin(), remaining.end(),
+                     [](const Afs2Entry &lhs, const Afs2Entry &rhs) {
+                       return (lhs.end - lhs.begin) > (rhs.end - rhs.begin);
+                     });
+    candidates.insert(candidates.end(), remaining.begin(), remaining.end());
+  }
 
-  constexpr std::array<const char *, 3> kDemuxers = {"hca", "adx", ""};
   for (const auto &entry : candidates) {
     if (entry.end <= entry.begin || entry.end > awb_bytes.size()) {
       continue;
@@ -2550,15 +2969,70 @@ bool transcode_awb_afs2_to_mp3_ffmpeg(
               awb_bytes.begin() + static_cast<std::ptrdiff_t>(entry.end),
               payload.begin());
 
-    for (const char *demuxer : kDemuxers) {
-      const std::optional<std::string> force_format =
-          (demuxer != nullptr && demuxer[0] != '\0')
-              ? std::optional<std::string>(demuxer)
-              : std::nullopt;
+    const AudioPayloadFormat payload_format =
+        detect_audio_payload_format(payload);
+    if (payload_format == AudioPayloadFormat::kUnknown) {
+      // Keep decode strict for AWB entries to avoid ffmpeg auto-probe false
+      // positives that produce noisy output.
+      continue;
+    }
+    const auto demuxer_candidates = build_awb_entry_demuxer_candidates(payload);
+    for (const auto &force_format : demuxer_candidates) {
+      const bool is_hca = force_format.has_value() && *force_format == "hca";
+      bool is_ehca = false;
+      if (is_hca) {
+        is_hca_or_ehca_signature_at(payload, 0U, &is_ehca);
+      }
+      const std::optional<uint16_t> hca_encryption_type =
+          is_hca ? detect_hca_encryption_type(payload) : std::nullopt;
+      // Follow MaiChartManager's decode behavior:
+      // - prefer no-key for unencrypted HCA (ciph=0)
+      // - use keyed decode when stream declares encryption.
+      const bool prefer_keyed_decode =
+          (hca_encryption_type.has_value() && *hca_encryption_type != 0U) ||
+          (is_ehca && !hca_encryption_type.has_value());
+      const bool allow_keyed_attempt =
+          !hca_encryption_type.has_value() || *hca_encryption_type != 0U;
       for (const auto &encoder : mp3_encoders) {
+        if (is_hca) {
+          const auto try_no_key_decode = [&]() {
+            remove_file_if_exists(target_mp3);
+            return transcode_audio_stdin_to_mp3_ffmpeg(
+                payload, target_mp3, encoder, force_format, nullptr);
+          };
+          const auto try_keyed_decode = [&]() {
+            if (!allow_keyed_attempt) {
+              return false;
+            }
+            for (const auto &hca_decode_options :
+                 hca_decode_options_candidates) {
+              remove_file_if_exists(target_mp3);
+              if (transcode_audio_stdin_to_mp3_ffmpeg(payload, target_mp3,
+                                                      encoder, force_format,
+                                                      &hca_decode_options)) {
+                return true;
+              }
+            }
+            return false;
+          };
+
+          if (prefer_keyed_decode) {
+            // For encrypted tracks, avoid no-key fallback because ffmpeg may
+            // still emit valid-looking noisy output with wrong decryption.
+            if (try_keyed_decode()) {
+              return true;
+            }
+          } else {
+            if (try_no_key_decode() || try_keyed_decode()) {
+              return true;
+            }
+          }
+          continue;
+        }
+
         remove_file_if_exists(target_mp3);
         if (transcode_audio_stdin_to_mp3_ffmpeg(payload, target_mp3, encoder,
-                                                force_format)) {
+                                                force_format, nullptr)) {
           return true;
         }
       }
@@ -2584,16 +3058,33 @@ bool transcode_audio_to_mp3_ffmpeg(
     return false;
   }
 
+  const std::string source_ext = lower(source.extension().string());
+  if (source_ext == ".awb") {
+    if (transcode_awb_afs2_to_mp3_ffmpeg(source, target_mp3, mp3_encoders,
+                                         preferred_awb_entry_ids)) {
+      return true;
+    }
+
+    // If this is a real AFS2 AWB container, avoid ffmpeg auto-probe fallback,
+    // which may "succeed" with invalid noisy output.
+    std::array<uint8_t, 4> head{};
+    std::ifstream in(source, std::ios::binary);
+    in.read(reinterpret_cast<char *>(head.data()),
+            static_cast<std::streamsize>(head.size()));
+    if (in.gcount() == static_cast<std::streamsize>(head.size()) &&
+        head[0] == static_cast<uint8_t>('A') &&
+        head[1] == static_cast<uint8_t>('F') &&
+        head[2] == static_cast<uint8_t>('S') &&
+        head[3] == static_cast<uint8_t>('2')) {
+      return false;
+    }
+  }
+
   for (const auto &encoder : mp3_encoders) {
     remove_file_if_exists(target_mp3);
     if (transcode_audio_file_to_mp3_ffmpeg(source, target_mp3, encoder)) {
       return true;
     }
-  }
-
-  if (lower(source.extension().string()) == ".awb") {
-    return transcode_awb_afs2_to_mp3_ffmpeg(source, target_mp3, mp3_encoders,
-                                            preferred_awb_entry_ids);
   }
 
   return false;
@@ -2708,14 +3199,17 @@ bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
     }
   }
 
-  if (transcode_audio_to_mp3_ffmpeg(decode_acb, target_mp3)) {
+  const std::vector<uint32_t> *preferred_ids_ptr =
+      preferred_awb_entry_ids.empty() ? nullptr : &preferred_awb_entry_ids;
+  if (transcode_audio_to_mp3_ffmpeg(decode_awb, target_mp3,
+                                    preferred_ids_ptr)) {
     return true;
   }
 
-  const std::vector<uint32_t> *preferred_ids_ptr =
-      preferred_awb_entry_ids.empty() ? nullptr : &preferred_awb_entry_ids;
-  return transcode_audio_to_mp3_ffmpeg(decode_awb, target_mp3,
-                                       preferred_ids_ptr);
+  // Match MaiChartManager behavior: decode from AWB entries referenced by ACB.
+  // Do not fall back to direct ACB ffmpeg probe, which can yield noisy output.
+  (void)decode_acb;
+  return false;
 }
 
 bool convert_mp3_to_acb_awb(const std::filesystem::path &source_mp3,
@@ -2773,7 +3267,17 @@ bool convert_ab_to_png(const std::filesystem::path &ab_file,
   if (write_embedded_png(ab_file, png_file)) {
     return true;
   }
-  return extract_unity_texture_bundle_to_png(ab_file, png_file);
+  // UABE-based Unity bundle decoding is not reliably thread-safe.
+  // Serialize the fallback path to keep multi-worker assets export stable.
+  static std::mutex unity_bundle_decode_mutex;
+  constexpr int kDecodeAttempts = 3;
+  for (int attempt = 0; attempt < kDecodeAttempts; ++attempt) {
+    std::lock_guard<std::mutex> guard(unity_bundle_decode_mutex);
+    if (extract_unity_texture_bundle_to_png(ab_file, png_file)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool convert_dat_or_usm_to_mp4(const std::filesystem::path &source,
@@ -2949,21 +3453,6 @@ bool convert_mp4_to_dat(const std::filesystem::path &source_mp4,
   const bool converted =
       transcode_mp4_to_vp9_ivf_bytes(source_mp4, ivf_bytes) &&
       build_minimal_dat_from_vp9_ivf(ivf_bytes, target_dat);
-
-  return converted;
-}
-
-bool convert_mp4_to_dat_with_template(const std::filesystem::path &source_mp4,
-                                      const std::filesystem::path &template_dat,
-                                      const std::filesystem::path &target_dat) {
-  if (!file_non_empty(source_mp4) || !file_non_empty(template_dat)) {
-    return false;
-  }
-
-  std::vector<uint8_t> ivf_bytes;
-  const bool ready = transcode_mp4_to_vp9_ivf_bytes(source_mp4, ivf_bytes);
-  const bool converted = ready && patch_template_dat_video_payloads(
-                                      template_dat, ivf_bytes, target_dat);
 
   return converted;
 }

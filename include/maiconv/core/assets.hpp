@@ -6,6 +6,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace maiconv {
 
@@ -33,6 +34,10 @@ struct AssetsOptions {
   std::optional<std::filesystem::path> cover_path;
   std::optional<std::filesystem::path> video_path;
 
+  std::vector<std::string> target_music_filters;
+  std::vector<std::string> target_difficulty_filters;
+
+  // Backward-compatible single-value filters.
   std::optional<std::string> target_music_id;
   std::optional<int> target_difficulty;
 
@@ -46,6 +51,10 @@ struct AssetsOptions {
   bool ignore_incomplete_assets = false;
   bool dummy_assets = false;
   bool skip_existing_exports = false;
+  bool export_chart = true;
+  bool export_audio = true;
+  bool export_cover = true;
+  bool export_video = true;
   bool music_id_folder_name = false;
   bool log_tracks_json = false;
   bool export_zip = false;

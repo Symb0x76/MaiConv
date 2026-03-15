@@ -123,98 +123,6 @@ std::optional<fs::path> find_ffmpeg_path_from_env() {
   return std::nullopt;
 }
 
-std::vector<unsigned char> make_minimal_vp9_ivf_header() {
-  std::vector<unsigned char> ivf(32U, 0U);
-  ivf[0] = static_cast<unsigned char>('D');
-  ivf[1] = static_cast<unsigned char>('K');
-  ivf[2] = static_cast<unsigned char>('I');
-  ivf[3] = static_cast<unsigned char>('F');
-  ivf[4] = 0U;
-  ivf[5] = 0U;
-  ivf[6] = 32U;
-  ivf[7] = 0U;
-  ivf[8] = static_cast<unsigned char>('V');
-  ivf[9] = static_cast<unsigned char>('P');
-  ivf[10] = static_cast<unsigned char>('9');
-  ivf[11] = static_cast<unsigned char>('0');
-  ivf[12] = 16U;
-  ivf[13] = 0U;
-  ivf[14] = 16U;
-  ivf[15] = 0U;
-  ivf[16] = 30U;
-  ivf[17] = 0U;
-  ivf[18] = 0U;
-  ivf[19] = 0U;
-  ivf[20] = 1U;
-  ivf[21] = 0U;
-  ivf[22] = 0U;
-  ivf[23] = 0U;
-  ivf[24] = 0U;
-  ivf[25] = 0U;
-  ivf[26] = 0U;
-  ivf[27] = 0U;
-  ivf[28] = 0U;
-  ivf[29] = 0U;
-  ivf[30] = 0U;
-  ivf[31] = 0U;
-  return ivf;
-}
-
-bool create_minimal_dat_template(const fs::path &template_path,
-                                 std::size_t payload_capacity) {
-  if (payload_capacity < 32U) {
-    return false;
-  }
-
-  const auto ivf_header = make_minimal_vp9_ivf_header();
-  std::vector<unsigned char> payload(payload_capacity, 0U);
-  std::copy(ivf_header.begin(), ivf_header.end(), payload.begin());
-
-  std::ofstream out(template_path, std::ios::binary | std::ios::trunc);
-  if (!out) {
-    return false;
-  }
-
-  constexpr std::size_t kMaxPlainPayloadPerChunk = 0x200U;
-  std::size_t written = 0;
-  while (written < payload.size()) {
-    const std::size_t this_chunk_size =
-        std::min(kMaxPlainPayloadPerChunk, payload.size() - written);
-
-    std::array<unsigned char, 0x20> header{};
-    header[0] = static_cast<unsigned char>('@');
-    header[1] = static_cast<unsigned char>('S');
-    header[2] = static_cast<unsigned char>('F');
-    header[3] = static_cast<unsigned char>('V');
-
-    const uint32_t chunk_size_after_header =
-        static_cast<uint32_t>(this_chunk_size);
-    header[4] =
-        static_cast<unsigned char>((chunk_size_after_header >> 24U) & 0xFFU);
-    header[5] =
-        static_cast<unsigned char>((chunk_size_after_header >> 16U) & 0xFFU);
-    header[6] =
-        static_cast<unsigned char>((chunk_size_after_header >> 8U) & 0xFFU);
-    header[7] = static_cast<unsigned char>(chunk_size_after_header & 0xFFU);
-
-    header[9] = 0U;  // use direct payload layout for synthetic minimal template
-    header[10] = 0U; // padding (big-endian)
-    header[11] = 0U;
-    header[12] = 0U; // channel 0
-    header[15] = 0U; // payload type 0 (stream)
-
-    out.write(reinterpret_cast<const char *>(header.data()),
-              static_cast<std::streamsize>(header.size()));
-    out.write(reinterpret_cast<const char *>(
-                  payload.data() + static_cast<std::ptrdiff_t>(written)),
-              static_cast<std::streamsize>(this_chunk_size));
-    written += this_chunk_size;
-  }
-
-  out.flush();
-  return static_cast<bool>(out);
-}
-
 bool is_ffmpeg_available() {
 #if defined(_WIN32)
   const int rc = std::system("ffmpeg -version >nul 2>nul");
@@ -334,26 +242,6 @@ bool create_minimal_crid_usm_with_payload(
 
   out.flush();
   return static_cast<bool>(out);
-}
-
-std::optional<std::size_t>
-probe_vp9_ivf_size_from_mp4(const fs::path &input_mp4,
-                            const fs::path &output_ivf) {
-  if (output_ivf.has_parent_path()) {
-    std::error_code ec;
-    fs::create_directories(output_ivf.parent_path(), ec);
-  }
-
-  const std::string cmd =
-      "ffmpeg -y -loglevel error -i \"" + input_mp4.string() +
-      "\" -an -c:v libvpx-vp9 -f ivf \"" + output_ivf.string() + "\"";
-  if (std::system(cmd.c_str()) != 0) {
-    return std::nullopt;
-  }
-  if (!fs::exists(output_ivf) || fs::file_size(output_ivf) == 0) {
-    return std::nullopt;
-  }
-  return static_cast<std::size_t>(fs::file_size(output_ivf));
 }
 
 } // namespace
@@ -520,47 +408,6 @@ TEST_CASE("media can package mp3 to acb+awb and roundtrip back to mp3") {
   REQUIRE(maiconv::convert_acb_awb_to_mp3(out_acb, out_awb, out_mp3));
   REQUIRE(fs::exists(out_mp3));
   REQUIRE(fs::file_size(out_mp3) == fs::file_size(src_mp3));
-
-  fs::remove_all(temp_root, ec);
-}
-
-TEST_CASE("media mp4->dat enforces template capacity boundary") {
-  if (!is_ffmpeg_available()) {
-    SKIP("ffmpeg not found in PATH");
-  }
-
-  const fs::path temp_root =
-      fs::temp_directory_path() / "maiconv_media_mp4_to_dat_capacity";
-  std::error_code ec;
-  fs::remove_all(temp_root, ec);
-  fs::create_directories(temp_root, ec);
-
-  const fs::path input_mp4 = temp_root / "input.mp4";
-  REQUIRE(create_tiny_mp4_sample(input_mp4));
-
-  const fs::path probe_ivf = temp_root / "probe.ivf";
-  const auto ivf_size_opt = probe_vp9_ivf_size_from_mp4(input_mp4, probe_ivf);
-  if (!ivf_size_opt.has_value()) {
-    SKIP("ffmpeg cannot encode VP9 IVF (libvpx-vp9 unavailable)");
-  }
-  const std::size_t ivf_size = *ivf_size_opt;
-
-  const fs::path small_template = temp_root / "small_template.dat";
-  const fs::path large_template = temp_root / "large_template.dat";
-  const std::size_t small_capacity = std::max<std::size_t>(32U, ivf_size / 2U);
-  const std::size_t large_capacity = ivf_size + 1024U;
-  REQUIRE(create_minimal_dat_template(small_template, small_capacity));
-  REQUIRE(create_minimal_dat_template(large_template, large_capacity));
-
-  const fs::path fail_output = temp_root / "fail.dat";
-  const fs::path success_output = temp_root / "success.dat";
-
-  REQUIRE_FALSE(maiconv::convert_mp4_to_dat_with_template(
-      input_mp4, small_template, fail_output));
-  REQUIRE(maiconv::convert_mp4_to_dat_with_template(input_mp4, large_template,
-                                                    success_output));
-  REQUIRE(fs::exists(success_output));
-  REQUIRE(fs::file_size(success_output) > 0U);
 
   fs::remove_all(temp_root, ec);
 }

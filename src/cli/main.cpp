@@ -6,11 +6,14 @@
 
 #include <CLI/CLI.hpp>
 
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -298,26 +301,6 @@ int run_media_video_to_mp4(const std::filesystem::path &input_video,
   }
 }
 
-int run_media_video_to_dat_with_template(
-    const std::filesystem::path &input_mp4,
-    const std::filesystem::path &template_dat, const std::string &output) {
-  try {
-    const auto target = resolve_binary_output_path(output, "pv.dat");
-    if (!maiconv::convert_mp4_to_dat_with_template(input_mp4, template_dat,
-                                                   target)) {
-      throw std::runtime_error(
-          "Video conversion failed: " + input_mp4.string() + " -> " +
-          target.string() + " (template: " + template_dat.string() + ")");
-    }
-    std::cout << "Successfully converted at: " << target.string() << "\n";
-    return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
-}
-
 int run_media_video_to_dat(const std::filesystem::path &input_mp4,
                            const std::string &output) {
   try {
@@ -364,6 +347,45 @@ parse_assets_log_level(const std::string &value) {
     return maiconv::AssetsLogLevel::Verbose;
   }
   return std::nullopt;
+}
+
+std::string trim_copy(std::string_view value) {
+  std::size_t begin = 0;
+  while (begin < value.size() &&
+         std::isspace(static_cast<unsigned char>(value[begin])) != 0) {
+    ++begin;
+  }
+
+  std::size_t end = value.size();
+  while (end > begin &&
+         std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
+    --end;
+  }
+  return std::string(value.substr(begin, end - begin));
+}
+
+bool apply_assets_export_type_token(maiconv::AssetsOptions &options,
+                                    const std::string &token) {
+  if (token == "chart" || token == "maidata" || token == "maidata.txt" ||
+      token == "ma2" || token == "result.ma2") {
+    options.export_chart = true;
+    return true;
+  }
+  if (token == "audio" || token == "music" || token == "track.mp3") {
+    options.export_audio = true;
+    return true;
+  }
+  if (token == "cover" || token == "jacket" || token == "bg" ||
+      token == "bg.png") {
+    options.export_cover = true;
+    return true;
+  }
+  if (token == "video" || token == "movie" || token == "pv" ||
+      token == "pv.mp4") {
+    options.export_video = true;
+    return true;
+  }
+  return false;
 }
 
 } // namespace
@@ -455,7 +477,7 @@ int main(int argc, char **argv) {
   std::string assets_input;
   std::string assets_output;
   std::string assets_id;
-  int assets_difficulty = 0;
+  std::string assets_difficulty;
   std::string assets_music;
   std::string assets_cover;
   std::string assets_video;
@@ -476,6 +498,7 @@ int main(int argc, char **argv) {
   int assets_jobs = 1;
   bool assets_timing = false;
   std::string assets_log_level_str = "normal";
+  std::vector<std::string> assets_types;
   auto *assets_cmd = app.add_subcommand(
       "assets",
       "Export from StreamingAssets (all, one id, or one id+difficulty)");
@@ -485,14 +508,13 @@ int main(int argc, char **argv) {
   assets_cmd->add_option("--output", assets_output, "Output directory")
       ->required();
   auto *assets_id_opt = assets_cmd->add_option(
-      "--id", assets_id, "Music id (optional, when omitted export all tracks)");
-  auto *assets_diff_opt =
-      assets_cmd
-          ->add_option(
-              "--difficulty", assets_difficulty,
-              "Difficulty 1..7 using exported maidata numbering (optional, "
-              "with --id set and no --difficulty export all difficulties)")
-          ->check(CLI::Range(1, 7));
+      "--id", assets_id,
+      "Music id filter (optional; comma-separated values/regex)");
+  auto *assets_diff_opt = assets_cmd->add_option(
+      "--difficulty", assets_difficulty,
+      "Difficulty filter using exported maidata numbering 1..7 "
+      "(optional; comma-separated values/regex, with --id set and "
+      "no --difficulty export all difficulties)");
   assets_cmd->add_option("--music", assets_music,
                          "Override music folder (default: auto-detect)");
   assets_cmd->add_option("--cover", assets_cover,
@@ -531,6 +553,11 @@ int main(int argc, char **argv) {
       ->check(CLI::Range(1, 128));
   assets_cmd->add_flag("--timing", assets_timing,
                        "Emit phase timing summary (aggregate + p95)");
+  assets_cmd
+      ->add_option("--types", assets_types,
+                   "Export type filter (comma-separated): "
+                   "maidata.txt|track.mp3|bg.png|pv.mp4")
+      ->delimiter(',');
   assets_cmd->add_option("--verbosity,--log-level", assets_log_level_str,
                          "Console output level: quiet|normal|verbose");
   assets_cmd->callback([&]() {
@@ -566,10 +593,10 @@ int main(int argc, char **argv) {
     options.streaming_assets_path = assets_input;
     options.output_path = assets_output;
     if (assets_id_opt->count() > 0 && !assets_id.empty()) {
-      options.target_music_id = assets_id;
+      options.target_music_filters.push_back(assets_id);
     }
-    if (assets_diff_opt->count() > 0) {
-      options.target_difficulty = assets_difficulty;
+    if (assets_diff_opt->count() > 0 && !assets_difficulty.empty()) {
+      options.target_difficulty_filters.push_back(assets_difficulty);
     }
     if (!assets_music.empty()) {
       options.music_path = assets_music;
@@ -599,6 +626,29 @@ int main(int argc, char **argv) {
     options.log_level = *log_level;
     options.jobs = assets_jobs;
     options.enable_timing = assets_timing;
+    if (!assets_types.empty()) {
+      options.export_chart = false;
+      options.export_audio = false;
+      options.export_cover = false;
+      options.export_video = false;
+
+      for (const auto &raw_token : assets_types) {
+        const std::string token = maiconv::lower(trim_copy(raw_token));
+        if (token.empty()) {
+          throw CLI::ValidationError("--types", "contains empty type item");
+        }
+        if (!apply_assets_export_type_token(options, token)) {
+          throw CLI::ValidationError("--types",
+                                     "unsupported export type: " + raw_token);
+        }
+      }
+    }
+
+    if (!options.export_chart && !options.export_audio &&
+        !options.export_cover && !options.export_video) {
+      throw CLI::ValidationError("--types",
+                                 "at least one export type is required");
+    }
 
     exit_code = maiconv::run_compile_assets(options);
   });
@@ -612,7 +662,6 @@ int main(int argc, char **argv) {
   std::string media_cover_output;
   std::string media_video_input;
   std::string media_video_output;
-  std::string media_video_template;
   bool media_audio_gpu = false;
   bool media_video_gpu = false;
 
@@ -745,15 +794,11 @@ int main(int argc, char **argv) {
   });
 
   auto *media_video_cmd = media_cmd->add_subcommand(
-      "video", "Convert .dat/.usm/.crid -> pv.mp4, or .mp4 -> pv.dat (optional "
-               "--template)");
+      "video", "Convert .dat/.usm/.crid -> pv.mp4, or .mp4 -> pv.dat");
   media_video_cmd
       ->add_option("--input", media_video_input,
                    "Input .dat/.usm/.crid/.mp4 path")
       ->required();
-  media_video_cmd->add_option("--template", media_video_template,
-                              "Optional template .dat/.usm for .mp4 input "
-                              "(when omitted, tries WannaCRI createusm path)");
   media_video_cmd->add_option("--output", media_video_output,
                               "Output file or directory (default: based on "
                               "direction: ./pv.mp4 or ./pv.dat)");
@@ -768,26 +813,11 @@ int main(int argc, char **argv) {
     const auto ext = maiconv::lower(
         std::filesystem::path(media_video_input).extension().string());
     if (ext == ".dat" || ext == ".usm" || ext == ".crid") {
-      if (!media_video_template.empty()) {
-        throw CLI::ValidationError("--template",
-                                   "not needed for .dat/.usm/.crid input");
-      }
       exit_code = run_media_video_to_mp4(media_video_input, media_video_output);
       return;
     }
 
     if (ext == ".mp4") {
-      if (!media_video_template.empty()) {
-        const auto template_ext = maiconv::lower(
-            std::filesystem::path(media_video_template).extension().string());
-        if (template_ext != ".dat" && template_ext != ".usm") {
-          throw CLI::ValidationError("--template",
-                                     "expected template .dat or .usm file");
-        }
-        exit_code = run_media_video_to_dat_with_template(
-            media_video_input, media_video_template, media_video_output);
-        return;
-      }
       exit_code = run_media_video_to_dat(media_video_input, media_video_output);
       return;
     }

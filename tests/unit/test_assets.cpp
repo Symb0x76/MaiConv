@@ -181,6 +181,25 @@ void write_binary_file(const fs::path &path,
             static_cast<std::streamsize>(bytes.size()));
 }
 
+bool create_embedded_png_ab(const fs::path &output_ab) {
+  // A tiny valid PNG payload prefixed with non-image bytes so assets export
+  // takes the .ab -> .png conversion path (instead of direct pseudo-image
+  // copy).
+  const std::vector<std::uint8_t> kTinyPng = {
+      0x89U, 0x50U, 0x4EU, 0x47U, 0x0DU, 0x0AU, 0x1AU, 0x0AU, 0x00U, 0x00U,
+      0x00U, 0x0DU, 0x49U, 0x48U, 0x44U, 0x52U, 0x00U, 0x00U, 0x00U, 0x01U,
+      0x00U, 0x00U, 0x00U, 0x01U, 0x08U, 0x06U, 0x00U, 0x00U, 0x00U, 0x1FU,
+      0x15U, 0xC4U, 0x89U, 0x00U, 0x00U, 0x00U, 0x0AU, 0x49U, 0x44U, 0x41U,
+      0x54U, 0x78U, 0x9CU, 0x63U, 0x00U, 0x01U, 0x00U, 0x00U, 0x05U, 0x00U,
+      0x01U, 0x0DU, 0x0AU, 0x2DU, 0xB4U, 0x00U, 0x00U, 0x00U, 0x00U, 0x49U,
+      0x45U, 0x4EU, 0x44U, 0xAEU, 0x42U, 0x60U, 0x82U};
+  std::vector<std::uint8_t> payload = {0x4DU, 0x41U, 0x49U, 0x43U,
+                                       0x4FU, 0x4EU, 0x56U, 0x5FU};
+  payload.insert(payload.end(), kTinyPng.begin(), kTinyPng.end());
+  write_binary_file(output_ab, payload);
+  return fs::exists(output_ab) && fs::file_size(output_ab) > 0;
+}
+
 bool is_ffmpeg_available() {
 #if defined(_WIN32)
   return std::system("ffmpeg -version >NUL 2>&1") == 0;
@@ -421,6 +440,63 @@ TEST_CASE("assets auto-detects media folders from streaming assets roots") {
   fs::remove_all(temp_root);
 }
 
+TEST_CASE("assets can export selected output types only") {
+  const fs::path temp_root = unique_temp_dir("assets_export_types_selected");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A022", "000457", "SelectiveSong", "VARIETY",
+               "PRISM");
+  create_media_assets(assets_root / "A022", "000457");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.export_video = false;
+  options.export_cover = false;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  const fs::path track_dir = output_root / "000457_SelectiveSong";
+  REQUIRE(fs::exists(track_dir / "maidata.txt"));
+  REQUIRE(fs::exists(track_dir / "track.mp3"));
+  REQUIRE_FALSE(fs::exists(track_dir / "bg.png"));
+  REQUIRE_FALSE(fs::exists(track_dir / "pv.mp4"));
+  REQUIRE_FALSE(fs::exists(output_root / "000457_SelectiveSong_Incomplete"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets can export audio only without chart output") {
+  const fs::path temp_root = unique_temp_dir("assets_export_audio_only");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A023", "000458", "AudioOnlySong", "VARIETY",
+               "PRISM");
+  create_media_assets(assets_root / "A023", "000458");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.export_chart = false;
+  options.export_cover = false;
+  options.export_video = false;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  const fs::path track_dir = output_root / "000458_AudioOnlySong";
+  REQUIRE_FALSE(fs::exists(track_dir / "maidata.txt"));
+  REQUIRE(fs::exists(track_dir / "track.mp3"));
+  REQUIRE_FALSE(fs::exists(track_dir / "bg.png"));
+  REQUIRE_FALSE(fs::exists(track_dir / "pv.mp4"));
+  REQUIRE_FALSE(fs::exists(output_root / "000458_AudioOnlySong_Incomplete"));
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets reports per-track progress before final total by default") {
   const fs::path temp_root = unique_temp_dir("assets_progress_default");
   const fs::path assets_root = temp_root / "StreamingAssets";
@@ -505,6 +581,50 @@ TEST_CASE("assets supports bounded parallel workers for track export") {
   REQUIRE(run_compile_assets(options) == 0);
   REQUIRE(fs::exists(output_root / "000222_ParallelA" / "maidata.txt"));
   REQUIRE(fs::exists(output_root / "000333_ParallelB" / "maidata.txt"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets parallel workers remain stable with .ab cover conversion") {
+  const fs::path temp_root = unique_temp_dir("assets_parallel_ab_cover");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  const fs::path db_root = assets_root / "A012";
+  fs::create_directories(db_root / "SoundData");
+  fs::create_directories(db_root / "AssetBundleImages" / "jacket");
+  fs::create_directories(db_root / "MovieData");
+
+  const std::vector<std::string> ids = {"000701", "000702", "000703",
+                                        "000704", "000705", "000706"};
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    const std::string title = "ParallelCover" + std::to_string(i + 1);
+    create_track(db_root, ids[i], title, "POPS", "PRISM", {2, 3});
+    write_text_file(db_root / "SoundData" / ("music" + ids[i] + ".mp3"),
+                    "dummy");
+    write_text_file(db_root / "MovieData" / (ids[i] + ".mp4"), "dummy");
+    REQUIRE(create_embedded_png_ab(db_root / "AssetBundleImages" / "jacket" /
+                                   ("ui_jacket_" + ids[i] + ".ab")));
+  }
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.jobs = 4;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    const std::string title = "ParallelCover" + std::to_string(i + 1);
+    const fs::path track_dir = output_root / (ids[i] + "_" + title);
+    REQUIRE(fs::exists(track_dir / "maidata.txt"));
+    REQUIRE(fs::exists(track_dir / "track.mp3"));
+    REQUIRE(fs::exists(track_dir / "bg.png"));
+    REQUIRE(fs::exists(track_dir / "pv.mp4"));
+    REQUIRE_FALSE(
+        fs::exists(output_root / (ids[i] + "_" + title + "_Incomplete")));
+  }
 
   fs::remove_all(temp_root);
 }
@@ -746,6 +866,10 @@ TEST_CASE("assets logs incomplete progress before failing without --ignore") {
   REQUIRE(out.find("Incomplete: 012341 RawMediaSongFail [DX]") !=
           std::string::npos);
   REQUIRE(out.find("Total music compiled:") == std::string::npos);
+  REQUIRE(fs::exists(output_root / "012341_RawMediaSongFail [DX]_Incomplete" /
+                     "maidata.txt"));
+  REQUIRE_FALSE(
+      fs::exists(output_root / "012341_RawMediaSongFail [DX]" / "maidata.txt"));
   REQUIRE(captured_err.str().find("Incomplete assets found. Use --ignore to "
                                   "continue.") != std::string::npos);
 
@@ -786,6 +910,10 @@ TEST_CASE(
   REQUIRE(out.find("Incomplete: 012341 RawMediaSongFail [DX]") !=
           std::string::npos);
   REQUIRE(out.find("ShouldNotProcess") == std::string::npos);
+  REQUIRE(fs::exists(output_root / "012341_RawMediaSongFail [DX]_Incomplete" /
+                     "maidata.txt"));
+  REQUIRE_FALSE(
+      fs::exists(output_root / "012341_RawMediaSongFail [DX]" / "maidata.txt"));
   REQUIRE_FALSE(
       fs::exists(output_root / "012342_ShouldNotProcess [DX]" / "maidata.txt"));
   REQUIRE(captured_err.str().find("Incomplete assets found. Use --ignore to "
@@ -918,8 +1046,55 @@ TEST_CASE("assets supports jacket_s fallback when jacket is missing") {
   fs::remove_all(temp_root);
 }
 
-TEST_CASE("assets keeps raw CRID dat when mp4 conversion fails") {
-  const fs::path temp_root = unique_temp_dir("assets_keep_raw_crid_video");
+TEST_CASE(
+    "assets falls back to jacket_s when primary jacket conversion fails") {
+  const fs::path temp_root =
+      unique_temp_dir("assets_jacket_s_fallback_on_decode_failure");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A045", "012340", "JacketDecodeFallbackSong",
+               "GAME", "PRISM");
+
+  const fs::path db_root = assets_root / "A045";
+  fs::create_directories(db_root / "SoundData");
+  fs::create_directories(db_root / "AssetBundleImages" / "jacket");
+  fs::create_directories(db_root / "AssetBundleImages" / "jacket_s");
+  fs::create_directories(db_root / "MovieData");
+
+  write_text_file(db_root / "SoundData" / "music002340.mp3", "dummy");
+  write_text_file(db_root / "MovieData" / "002340.mp4", "dummy");
+
+  // Intentionally invalid .ab payload for primary jacket.
+  write_binary_file(db_root / "AssetBundleImages" / "jacket" /
+                        "ui_jacket_002340.ab",
+                    {0x00U, 0x01U, 0x02U, 0x03U});
+  // Valid pseudo-image .ab for fallback candidate.
+  write_binary_file(db_root / "AssetBundleImages" / "jacket_s" /
+                        "ui_jacket_002340_s.ab",
+                    {0xFFU, 0xD8U, 0xFFU, 0xE0U, 0x00U, 0x10U, 0xFFU, 0xD9U});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+
+  REQUIRE(run_compile_assets(options) == 0);
+  const fs::path exported =
+      output_root / "012340_JacketDecodeFallbackSong [DX]";
+  REQUIRE(fs::exists(exported / "maidata.txt"));
+  REQUIRE(fs::exists(exported / "track.mp3"));
+  REQUIRE(fs::exists(exported / "pv.mp4"));
+  REQUIRE(fs::exists(exported / "bg.jpg"));
+  REQUIRE_FALSE(fs::exists(output_root /
+                           "012340_JacketDecodeFallbackSong [DX]_Incomplete"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets marks CRID video conversion failure as incomplete") {
+  const fs::path temp_root = unique_temp_dir("assets_crid_video_incomplete");
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path output_root = temp_root / "output";
 
@@ -945,18 +1120,17 @@ TEST_CASE("assets keeps raw CRID dat when mp4 conversion fails") {
   options.streaming_assets_path = assets_root;
   options.output_path = output_root;
   options.format = ChartFormat::Simai;
+  options.ignore_incomplete_assets = true;
 
   REQUIRE(run_compile_assets(options) == 0);
-  REQUIRE(
-      fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "maidata.txt"));
-  REQUIRE(
-      fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "track.mp3"));
-  REQUIRE(fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "bg.png"));
-  REQUIRE(fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "pv.dat"));
-  REQUIRE_FALSE(
-      fs::exists(output_root / "011241_RawCriVideoSong [DX]" / "pv.mp4"));
-  REQUIRE_FALSE(
-      fs::exists(output_root / "011241_RawCriVideoSong [DX]_Incomplete"));
+  const fs::path incomplete_dir =
+      output_root / "011241_RawCriVideoSong [DX]_Incomplete";
+  REQUIRE(fs::exists(incomplete_dir / "maidata.txt"));
+  REQUIRE(fs::exists(incomplete_dir / "track.mp3"));
+  REQUIRE(fs::exists(incomplete_dir / "bg.png"));
+  REQUIRE_FALSE(fs::exists(incomplete_dir / "pv.mp4"));
+  REQUIRE_FALSE(fs::exists(incomplete_dir / "pv.dat"));
+  REQUIRE_FALSE(fs::exists(output_root / "011241_RawCriVideoSong [DX]"));
 
   fs::remove_all(temp_root);
 }
@@ -1836,6 +2010,36 @@ TEST_CASE("assets preserves utf8 folder names for non-English titles") {
 
   fs::remove_all(temp_root);
 }
+
+TEST_CASE("assets handles supplementary unicode in export folder names") {
+  const fs::path temp_root = unique_temp_dir("assets_utf8_supplementary");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  const std::u8string title_u8 = u8"\U00020BB7\U0001F680DX";
+  std::string title;
+  title.reserve(title_u8.size());
+  for (const char8_t ch : title_u8) {
+    title.push_back(static_cast<char>(ch));
+  }
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A000", "000322", title, "POPS", "PRISM");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+
+  REQUIRE(run_compile_assets(options) == 0);
+
+  const std::string folder_name = "000322_" + sanitize_folder_name(title);
+  const fs::path expected_folder = append_utf8_path(output_root, folder_name);
+  REQUIRE(fs::exists(expected_folder / "maidata.txt"));
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets exports selected id with selected difficulty only") {
   const fs::path temp_root = unique_temp_dir("assets_id_one_diff");
   const fs::path assets_root = temp_root / "StreamingAssets";
@@ -1859,6 +2063,59 @@ TEST_CASE("assets exports selected id with selected difficulty only") {
       read_text_file(output_root / "000999_DiffSong" / "maidata.txt");
   REQUIRE(maidata.find("&inote_3=") != std::string::npos);
   REQUIRE(maidata.find("&inote_2=") == std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets supports comma-separated and regex music id filters") {
+  const fs::path temp_root = unique_temp_dir("assets_id_multi_regex");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A000", "000701", "IdExact", "POPS", "PRISM", {2});
+  create_track(assets_root / "A000", "000702", "IdSkipped", "POPS", "PRISM",
+               {2});
+  create_track(assets_root / "A000", "001199", "IdRegex", "POPS", "PRISM", {2});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.target_music_filters = {"701,^0011\\d{2}$"};
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "000701_IdExact" / "maidata.txt"));
+  REQUIRE(fs::exists(output_root / "001199_IdRegex" / "maidata.txt"));
+  REQUIRE_FALSE(fs::exists(output_root / "000702_IdSkipped"));
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets supports comma-separated and regex difficulty filters") {
+  const fs::path temp_root = unique_temp_dir("assets_diff_multi_regex");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A000", "000905", "DiffRegex", "POPS", "PRISM",
+               {2, 3, 4});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.target_music_filters = {"905"};
+  options.target_difficulty_filters = {"2,^4$"};
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "000905_DiffRegex" / "maidata.txt"));
+
+  const std::string maidata =
+      read_text_file(output_root / "000905_DiffRegex" / "maidata.txt");
+  REQUIRE(maidata.find("&inote_2=") != std::string::npos);
+  REQUIRE(maidata.find("&inote_4=") != std::string::npos);
+  REQUIRE(maidata.find("&inote_3=") == std::string::npos);
 
   fs::remove_all(temp_root);
 }
