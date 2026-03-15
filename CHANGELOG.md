@@ -1,27 +1,27 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
-
-## v0.0.2 - Performance Improvements
+## v0.0.3 - Audio/Video Conversion Improvements
 
 ### Added
 
-- assets: skip processing for reserved music IDs.
-- tests: add coverage for exporting specific music ID and fix related test case.
-- release workflow: add dynamic changelog preparation for GitHub Releases.
+- assets: support comma-separated and regex filters for `--id` and `--difficulty`.
+- assets: add `--types` to export selected outputs only (`maidata.txt`/`track.mp3`/`bg.png`/`pv.mp4`).
+- assets/media: improve media fallback handling, including better jacket fallback behavior and stricter incomplete output marking.
+- media: improve ACB/AWB parsing and HCA decode flow to reduce noisy audio decode fallbacks.
+- media: expand video conversion path support and conversion strategy handling across DAT/USM/CRID inputs.
 
 ### Changed
 
-- assets: normalize genre and version layout in asset compilation.
-- assets: remove redundant chart converter tool information from maidata document.
-- cmake: remove obsolete CMakeLists.txt for vgmstream.
-- ci/docs/tests: expand end-to-end coverage for libav and ffmpeg fallback paths.
-
-### Performance
-
-- assets: refactor asset candidate finding logic with hash map for faster lookup.
+- cli: enable unit buffering for stdout/stderr for more predictable command output behavior.
+- ffmpeg/tooling: streamline ffmpeg setup and add `--gpu` flow improvements in CLI-facing behavior.
+- media: remove legacy template-based `mp4 -> dat` path in favor of the built-in conversion pipeline.
 
 ### Fixed
 
-- assets: update genre mapping to use `&` instead of `＆`.
-- media: use global environment for Unix ffmpeg spawn helpers.
+- assets: ensure incomplete track progress is logged before failing when `--ignore` is not enabled.
+- assets: fix missing version mapping and improve export folder creation fallback logic.
+
+### Build & CI
+
+- build: remove unused `vgmstream` dependency.
+- release workflow: improve checkout strategy with submodules and fetch-depth handling.
