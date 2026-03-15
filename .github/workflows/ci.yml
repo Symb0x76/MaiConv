@@ -78,6 +78,10 @@ jobs:
         name: build-${{ matrix.os }}
         path: build/default
 
+    - name: Restore executable permissions (Linux/macOS)
+      if: runner.os != 'Windows'
+      run: chmod +x build/default/MaiConv build/default/MaiConv_unit_tests
+
     - name: Verify CTest discovery
       run: |
         ctest --preset default --show-only=human
