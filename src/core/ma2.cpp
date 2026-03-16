@@ -107,8 +107,9 @@ ParsedType parse_type(std::string raw) {
 
 NoteType map_note_type(const std::string& base) {
   static const std::unordered_map<std::string, NoteType> kMap = {
-      {"TAP", NoteType::Tap},       {"STR", NoteType::SlideStart},   {"TTP", NoteType::TouchTap},
-      {"HLD", NoteType::Hold},      {"THO", NoteType::TouchHold},    {"SI_", NoteType::SlideStraight},
+      {"TAP", NoteType::Tap},       {"STR", NoteType::SlideStart},   {"NST", NoteType::SlideStart},
+      {"NSS", NoteType::SlideStart}, {"TTP", NoteType::TouchTap},     {"HLD", NoteType::Hold},
+      {"THO", NoteType::TouchHold}, {"SI_", NoteType::SlideStraight},
       {"SV_", NoteType::SlideV},    {"SF_", NoteType::SlideWifi},    {"SCL", NoteType::SlideCurveLeft},
       {"SCR", NoteType::SlideCurveRight},                            {"SUL", NoteType::SlideQ},
       {"SUR", NoteType::SlideP},    {"SLL", NoteType::SlideVTurnLeft}, {"SLR", NoteType::SlideVTurnRight},

@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+
 using namespace maiconv;
 
 TEST_CASE("simai tokenizer handles inote document") {
@@ -71,6 +73,59 @@ TEST_CASE("simai tokenizer preserves ampersands in line-based metadata") {
   REQUIRE(doc.chart_tokens.count(2) == 1);
 }
 
+TEST_CASE("simai tokenizer preserves ampersands in compact maidata metadata") {
+  SimaiTokenizer tokenizer;
+  const std::string doc_text =
+      "&title=Rock & Roll? [DX]&genre=ゲーム&バラエティ&inote_2=(120){4}1,2,3,4,E";
+  const auto doc = tokenizer.parse_document(doc_text);
+
+  REQUIRE(doc.metadata.at("title") == "Rock & Roll? [DX]");
+  REQUIRE(doc.metadata.at("genre") == "ゲーム&バラエティ");
+  REQUIRE(doc.chart_tokens.count(2) == 1);
+  REQUIRE_FALSE(doc.chart_tokens.at(2).empty());
+}
+
+TEST_CASE("simai tokenizer supports compact maidata without first ampersand") {
+  SimaiTokenizer tokenizer;
+  const std::string doc_text =
+      "title=No Prefix&inote_3=(120){4}1,2,3,4,E";
+  const auto doc = tokenizer.parse_document(doc_text);
+
+  REQUIRE(doc.metadata.at("title") == "No Prefix");
+  REQUIRE(doc.chart_tokens.count(3) == 1);
+  REQUIRE_FALSE(doc.chart_tokens.at(3).empty());
+}
+
+TEST_CASE("simai tokenizer strips supported comments while keeping # in "
+          "duration tags") {
+  SimaiTokenizer tokenizer;
+  const std::string text =
+      "(120){4}1,2,3,||drop this line\n4,#drop this comment\n5h[1#2],6,\nE";
+  const auto tokens = tokenizer.tokenize_text(text);
+
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "4") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "5h[1#2]") != tokens.end());
+  REQUIRE(std::none_of(tokens.begin(), tokens.end(), [](const std::string &t) {
+    return t.find("drop") != std::string::npos || t.find("||") != std::string::npos;
+  }));
+}
+
+TEST_CASE("simai tokenizer applies compatibility fixes from external import "
+          "workflows") {
+  SimaiTokenizer tokenizer;
+  const std::string text = "1{4},2(120),3qx4,5[16-3],6-?7[4:1],8[4:1]b,";
+  const auto tokens = tokenizer.tokenize_text(text);
+
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "1") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "{4}") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "2") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "(120)") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "3xq4") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "5[16:3]") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "6?-7[4:1]") != tokens.end());
+  REQUIRE(std::find(tokens.begin(), tokens.end(), "8b[4:1]") != tokens.end());
+}
+
 TEST_CASE("simai compose uses real export slide notation mapping") {
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
@@ -108,7 +163,7 @@ TEST_CASE("simai compose uses real export slide notation mapping") {
 }
 
 TEST_CASE(
-    "simai compose keeps special slide starts and chains contiguous slides") {
+    "simai compose merges ex slide starts and chains contiguous slides") {
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -141,7 +196,51 @@ TEST_CASE(
   SimaiComposer composer;
   const std::string simai = composer.compose_chart(chart);
 
-  REQUIRE(simai.find("2x_/2-7[8:1]*-2[8:1]") != std::string::npos);
+  REQUIRE(simai.find("2x-7[8:1]*-2[8:1]") != std::string::npos);
+  REQUIRE(simai.find("2x_/") == std::string::npos);
+}
+
+TEST_CASE("simai compose merges simultaneous ex slide starts into q-slides") {
+  Chart chart;
+  chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
+  chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
+
+  Note start_left;
+  start_left.type = NoteType::SlideStart;
+  start_left.state = SpecialState::Ex;
+  start_left.key = 0;
+  chart.notes().push_back(start_left);
+
+  Note start_right;
+  start_right.type = NoteType::SlideStart;
+  start_right.state = SpecialState::Ex;
+  start_right.key = 4;
+  chart.notes().push_back(start_right);
+
+  Note left_slide;
+  left_slide.type = NoteType::SlideP;
+  left_slide.bar = 0;
+  left_slide.key = 0;
+  left_slide.end_key = 6;
+  left_slide.wait_ticks = 96;
+  left_slide.last_ticks = 192;
+  chart.notes().push_back(left_slide);
+
+  Note right_slide;
+  right_slide.type = NoteType::SlideP;
+  right_slide.bar = 0;
+  right_slide.key = 4;
+  right_slide.end_key = 2;
+  right_slide.wait_ticks = 96;
+  right_slide.last_ticks = 192;
+  chart.notes().push_back(right_slide);
+
+  SimaiComposer composer;
+  const std::string simai = composer.compose_chart(chart);
+
+  REQUIRE(simai.find("1xq7[2:1]/5xq3[2:1]") != std::string::npos);
+  REQUIRE(simai.find("1x_/") == std::string::npos);
+  REQUIRE(simai.find("5x_/") == std::string::npos);
 }
 
 TEST_CASE(
