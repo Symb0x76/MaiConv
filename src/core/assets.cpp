@@ -121,6 +121,147 @@ namespace maiconv
             }
         }
 
+        std::string normalize_version_name_key(std::string value)
+        {
+            value = lower(trim(value));
+            value.erase(std::remove_if(value.begin(), value.end(),
+                                       [](unsigned char c)
+                                       { return std::isspace(c) != 0; }),
+                        value.end());
+            return value;
+        }
+
+        std::string version_name_from_id(std::string_view version_id)
+        {
+            static const std::unordered_map<std::string, std::string>
+                kVersionNameById = {
+                    {"0", "maimai"},
+                    {"1", "maimai PLUS"},
+                    {"2", "GreeN"},
+                    {"3", "GreeN PLUS"},
+                    {"4", "ORANGE"},
+                    {"5", "ORANGE PLUS"},
+                    {"6", "PiNK"},
+                    {"7", "PiNK PLUS"},
+                    {"8", "MURASAKi"},
+                    {"9", "MURASAKi PLUS"},
+                    {"10", "MiLK"},
+                    {"11", "MiLK PLUS"},
+                    {"12", "FiNALE"},
+                    {"13", "maimaDX"},
+                    {"14", "maimaDX PLUS"},
+                    {"15", "Splash"},
+                    {"16", "Splash PLUS"},
+                    {"17", "UNiVERSE"},
+                    {"18", "UNiVERSE PLUS"},
+                    {"19", "FESTiVAL"},
+                    {"20", "FESTiVAL PLUS"},
+                    {"21", "BUDDiES"},
+                    {"22", "BUDDiES PLUS"},
+                    {"23", "PRiSM"},
+                    {"24", "PRiSM PLUS"},
+                    {"25", "CiRCLE"},
+                };
+
+            const std::string key = trim(std::string(version_id));
+            const auto it = kVersionNameById.find(key);
+            if (it == kVersionNameById.end())
+            {
+                return {};
+            }
+            return it->second;
+        }
+
+        std::string version_id_from_name(std::string_view version_name)
+        {
+            static const std::unordered_map<std::string, std::string>
+                kVersionIdByName = {
+                    {"maimai", "0"},
+                    {"maimaiplus", "1"},
+                    {"green", "2"},
+                    {"greenplus", "3"},
+                    {"orange", "4"},
+                    {"orangeplus", "5"},
+                    {"pink", "6"},
+                    {"pinkplus", "7"},
+                    {"murasaki", "8"},
+                    {"murasakiplus", "9"},
+                    {"milk", "10"},
+                    {"milkplus", "11"},
+                    {"finale", "12"},
+                    {"maimadx", "13"},
+                    {"maimadxplus", "14"},
+                    {"deluxe", "13"},
+                    {"deluxeplus", "14"},
+                    {"splash", "15"},
+                    {"splashplus", "16"},
+                    {"universe", "17"},
+                    {"universeplus", "18"},
+                    {"festival", "19"},
+                    {"festivalplus", "20"},
+                    {"buddies", "21"},
+                    {"buddiesplus", "22"},
+                    {"prism", "23"},
+                    {"prismplus", "24"},
+                    {"circle", "25"},
+                };
+
+            const std::string key = normalize_version_name_key(std::string(version_name));
+            if (key.empty())
+            {
+                return {};
+            }
+            const auto it = kVersionIdByName.find(key);
+            if (it == kVersionIdByName.end())
+            {
+                return {};
+            }
+            return it->second;
+        }
+
+        std::string normalize_export_version_display(std::string version)
+        {
+            const std::string key = normalize_version_name_key(version);
+            if (key == "maimadx" || key == "deluxe")
+            {
+                return "DELUXE";
+            }
+            if (key == "maimadxplus" || key == "deluxeplus")
+            {
+                return "DELUXE PLUS";
+            }
+            return version;
+        }
+
+        std::pair<std::string, std::string>
+        complete_version_fields(std::string version_id, std::string version)
+        {
+            version_id = trim(version_id);
+            version = trim(version);
+
+            if ((version.empty() || version == "Unknown") && !version_id.empty() &&
+                version_id != "0")
+            {
+                const std::string inferred = version_name_from_id(version_id);
+                if (!inferred.empty())
+                {
+                    version = inferred;
+                }
+            }
+
+            if ((version_id.empty() || version_id == "0") && !version.empty() &&
+                version != "Unknown")
+            {
+                const std::string inferred = version_id_from_name(version);
+                if (!inferred.empty())
+                {
+                    version_id = inferred;
+                }
+            }
+
+            return {version_id, version};
+        }
+
         struct TrackInfo
         {
             struct DifficultyInfo
@@ -680,6 +821,30 @@ namespace maiconv
                 {
                     const std::string parsed = trim(element_text(version_name));
                     if (!parsed.empty())
+                    {
+                        info.version = parsed;
+                    }
+                }
+            }
+            if (info.version.empty() || info.version == "Unknown")
+            {
+                if (auto *version = find_first_element_by_name(root, "version"))
+                {
+                    std::string parsed;
+                    if (auto *version_name = version->FirstChildElement("str"))
+                    {
+                        parsed = trim(element_text(version_name));
+                    }
+                    else
+                    {
+                        parsed = trim(element_text(version));
+                    }
+                    const bool is_numeric =
+                        !parsed.empty() &&
+                        std::all_of(parsed.begin(), parsed.end(),
+                                    [](unsigned char c)
+                                    { return std::isdigit(c) != 0; });
+                    if (!parsed.empty() && !is_numeric)
                     {
                         info.version = parsed;
                     }
@@ -1375,8 +1540,14 @@ namespace maiconv
             case AssetsExportLayout::Genre:
                 return info.genre.empty() ? "Unknown" : normalize_layout_genre(info.genre);
             case AssetsExportLayout::Version:
-                return info.version.empty() ? "Unknown"
-                                            : normalize_layout_version(info.version);
+            {
+                const auto completed =
+                    complete_version_fields(info.version_id, info.version);
+                const std::string version =
+                    normalize_export_version_display(completed.second);
+                return version.empty() ? "Unknown"
+                                       : normalize_layout_version(version);
+            }
             }
             return "";
         }
@@ -1699,7 +1870,12 @@ namespace maiconv
             {
                 genre = "ゲーム&バラエティ";
             }
-            const std::string version = normalize_maidata_metadata_value(info.version);
+            const auto completed = complete_version_fields(info.version_id, info.version);
+            const std::string version_id = completed.first.empty() ? info.version_id
+                                                                   : completed.first;
+            const std::string version =
+                normalize_maidata_metadata_value(
+                    normalize_export_version_display(completed.second));
 
             std::string out;
             std::size_t reserve_size = 256;
@@ -1732,7 +1908,7 @@ namespace maiconv
                 out += "\n";
             }
             out += "&versionid=";
-            out += info.version_id;
+            out += version_id;
             out += "\n";
             if (!version.empty() && version != "Unknown")
             {

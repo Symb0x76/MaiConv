@@ -401,12 +401,13 @@ TEST_CASE("assets supports genre/version layout")
   fs::remove_all(temp_root);
 }
 
-TEST_CASE("assets version layout maps numeric version to AddVersion id name")
+TEST_CASE("assets version layout falls back to AddVersion id for folder naming")
 {
   const fs::path temp_root = unique_temp_dir("assets_version_id_map");
   const fs::path assets_root = temp_root / "StreamingAssets";
   const fs::path out_version = temp_root / "out_version";
   const fs::path track_folder = assets_root / "L100" / "music" / "music000777";
+  const fs::path track_folder_dx = assets_root / "L100" / "music" / "music000778";
 
   fs::create_directories(track_folder);
   write_text_file(track_folder / "000777_00.ma2", sample_ma2());
@@ -424,6 +425,21 @@ TEST_CASE("assets version layout maps numeric version to AddVersion id name")
       "</MusicData>\n";
   write_text_file(track_folder / "Music.xml", xml);
 
+  fs::create_directories(track_folder_dx);
+  write_text_file(track_folder_dx / "000778_00.ma2", sample_ma2());
+  const std::string xml_dx =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<MusicData>\n"
+      "  <name><id>778</id><str>VersionDxFallbackSong</str></name>\n"
+      "  <sortName><str>VersionDxFallbackSong</str></sortName>\n"
+      "  <genreName><id>101</id><str>POPSアニメ</str></genreName>\n"
+      "  <version>13000</version>\n"
+      "  <AddVersion><id>13</id><str></str></AddVersion>\n"
+      "  <artistName><id>1</id><str>Mock Artist</str></artistName>\n"
+      "  <bpm>120</bpm>\n"
+      "</MusicData>\n";
+  write_text_file(track_folder_dx / "Music.xml", xml_dx);
+
   AssetsOptions by_version;
   by_version.streaming_assets_path = assets_root;
   by_version.output_path = out_version;
@@ -432,17 +448,12 @@ TEST_CASE("assets version layout maps numeric version to AddVersion id name")
   by_version.music_id_folder_name = true;
 
   REQUIRE(run_compile_assets(by_version) == 0);
-  std::vector<fs::path> version_dirs;
-  for (const auto &entry : fs::directory_iterator(out_version))
-  {
-    if (entry.is_directory())
-    {
-      version_dirs.push_back(entry.path());
-    }
-  }
-  REQUIRE(version_dirs.size() == 1);
-  REQUIRE(fs::exists(version_dirs.front() / "000777" / "result.ma2"));
+  REQUIRE(fs::exists(out_version / "BUDDiES" / "000777" / "result.ma2"));
+  REQUIRE(fs::exists(out_version / "DELUXE" / "000778" / "result.ma2"));
   REQUIRE_FALSE(fs::exists(out_version / "20000"));
+  REQUIRE_FALSE(fs::exists(out_version / "13000"));
+  REQUIRE_FALSE(fs::exists(out_version / "Unknown" / "000777" / "result.ma2"));
+  REQUIRE_FALSE(fs::exists(out_version / "Unknown" / "000778" / "result.ma2"));
 
   fs::remove_all(temp_root);
 }
@@ -1525,6 +1536,68 @@ TEST_CASE("assets exports maidata format with metadata fields",
   REQUIRE(maidata.find("&lv_3=7.8") != std::string::npos);
   REQUIRE(maidata.find("&inote_2=") != std::string::npos);
   REQUIRE(maidata.find("&inote_3=") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets maidata auto-completes version and versionid when one is missing",
+          "[assets][maidata]")
+{
+  const fs::path temp_root = unique_temp_dir("assets_maidata_version_autofill");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  const fs::path track_missing_version =
+      assets_root / "A045" / "music" / "music012341";
+  fs::create_directories(track_missing_version);
+  write_text_file(track_missing_version / "012341_00.ma2", sample_ma2());
+  const std::string xml_missing_version =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<MusicData>\n"
+      "  <name><id>12341</id><str>MissingVersionName</str></name>\n"
+      "  <artistName><id>1</id><str>" +
+      kMockArtist +
+      "</str></artistName>\n"
+      "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
+      "  <bpm>185</bpm>\n"
+      "  <AddVersion><id>13</id><str></str></AddVersion>\n"
+      "</MusicData>\n";
+  write_text_file(track_missing_version / "Music.xml", xml_missing_version);
+
+  const fs::path track_missing_versionid =
+      assets_root / "A045" / "music" / "music012342";
+  fs::create_directories(track_missing_versionid);
+  write_text_file(track_missing_versionid / "012342_00.ma2", sample_ma2());
+  const std::string xml_missing_versionid =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<MusicData>\n"
+      "  <name><id>12342</id><str>MissingVersionId</str></name>\n"
+      "  <artistName><id>1</id><str>" +
+      kMockArtist +
+      "</str></artistName>\n"
+      "  <genreName><id>104</id><str>ゲームバラエティ</str></genreName>\n"
+      "  <bpm>185</bpm>\n"
+      "  <version><str>maimadx plus</str></version>\n"
+      "</MusicData>\n";
+  write_text_file(track_missing_versionid / "Music.xml", xml_missing_versionid);
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Maidata;
+
+  REQUIRE(run_compile_assets(options) == 0);
+
+  const std::string maidata_missing_version =
+      read_text_file(output_root / "012341_MissingVersionName [DX]" / "maidata.txt");
+  REQUIRE(maidata_missing_version.find("&versionid=13") != std::string::npos);
+  REQUIRE(maidata_missing_version.find("&version=DELUXE") != std::string::npos);
+
+  const std::string maidata_missing_versionid =
+      read_text_file(output_root / "012342_MissingVersionId [DX]" / "maidata.txt");
+  REQUIRE(maidata_missing_versionid.find("&version=DELUXE PLUS") !=
+          std::string::npos);
+  REQUIRE(maidata_missing_versionid.find("&versionid=14") != std::string::npos);
 
   fs::remove_all(temp_root);
 }
