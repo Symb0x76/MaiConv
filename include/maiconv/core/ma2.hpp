@@ -7,22 +7,26 @@
 #include <string>
 #include <vector>
 
-namespace maiconv {
+namespace maiconv
+{
 
-class Ma2Tokenizer {
- public:
-  std::vector<std::string> tokenize_file(const std::filesystem::path& path) const;
-  std::vector<std::string> tokenize_text(const std::string& text) const;
-};
+  class Ma2Tokenizer
+  {
+  public:
+    std::vector<std::string> tokenize_file(const std::filesystem::path &path) const;
+    std::vector<std::string> tokenize_text(const std::string &text) const;
+  };
 
-class Ma2Parser {
- public:
-  Chart parse(const std::vector<std::string>& lines) const;
-};
+  class Ma2Parser
+  {
+  public:
+    Chart parse(const std::vector<std::string> &lines) const;
+  };
 
-class Ma2Composer {
- public:
-  std::string compose(const Chart& chart, ChartFormat format) const;
-};
+  class Ma2Composer
+  {
+  public:
+    std::string compose(const Chart &chart, ChartFormat format) const;
+  };
 
-}  // namespace maiconv
+} // namespace maiconv

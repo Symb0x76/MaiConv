@@ -112,44 +112,47 @@ endif()
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 set(MAICONV_UABE_LIBCOMPRESSION_SOURCES
-    third_party/unity_uabe/libCompression/lz4.c
-    third_party/unity_uabe/libCompression/lz4frame.c
-    third_party/unity_uabe/libCompression/lz4hc.c
-    third_party/unity_uabe/libCompression/xxhash.c
-    third_party/unity_uabe/libCompression/lz4dec.cpp
-    third_party/unity_uabe/libCompression/lz4enc.cpp
-    third_party/unity_uabe/libCompression/LzFind.c
-    third_party/unity_uabe/libCompression/LzFindMt.c
-    third_party/unity_uabe/libCompression/LzmaDec.c
-    third_party/unity_uabe/libCompression/LzmaEnc.c
-    third_party/unity_uabe/libCompression/Threads.c
+    src/uabe/libCompression/lz4.c
+    src/uabe/libCompression/lz4frame.c
+    src/uabe/libCompression/lz4hc.c
+    src/uabe/libCompression/xxhash.c
+    src/uabe/libCompression/lz4dec.cpp
+    src/uabe/libCompression/lz4enc.cpp
+    src/uabe/libCompression/LzFind.c
+    src/uabe/libCompression/LzFindMt.c
+    src/uabe/libCompression/LzmaDec.c
+    src/uabe/libCompression/LzmaEnc.c
+    src/uabe/libCompression/Threads.c
 )
 
 add_library(maiconv_uabe_libCompression STATIC
     ${MAICONV_UABE_LIBCOMPRESSION_SOURCES}
 )
-target_include_directories(maiconv_uabe_libCompression PUBLIC third_party/unity_uabe/libCompression)
+target_include_directories(maiconv_uabe_libCompression PUBLIC include)
+target_include_directories(maiconv_uabe_libCompression PRIVATE src/uabe/libCompression)
 if(NOT WIN32)
     target_link_libraries(maiconv_uabe_libCompression PUBLIC Threads::Threads)
 endif()
 
 add_library(maiconv_uabe_libStringConverter STATIC
-    third_party/unity_uabe/libStringConverter/convert.cpp
+    src/uabe/libStringConverter/convert.cpp
 )
-target_include_directories(maiconv_uabe_libStringConverter PUBLIC third_party/unity_uabe/libStringConverter)
+target_include_directories(maiconv_uabe_libStringConverter PUBLIC include)
+target_include_directories(maiconv_uabe_libStringConverter PRIVATE src/uabe/libStringConverter)
 
 add_library(maiconv_uabe_assetstools STATIC
-    third_party/unity_uabe/AssetsTools/AssetBundleFileFormat.cpp
-    third_party/unity_uabe/AssetsTools/AssetBundleFileTable.cpp
-    third_party/unity_uabe/AssetsTools/AssetsFileFormat.cpp
-    third_party/unity_uabe/AssetsTools/AssetsFileReader.cpp
-    third_party/unity_uabe/AssetsTools/AssetsFileTable.cpp
-    third_party/unity_uabe/AssetsTools/AssetsReplacer.cpp
-    third_party/unity_uabe/AssetsTools/AssetTypeClass.cpp
-    third_party/unity_uabe/AssetsTools/BundleReplacer.cpp
-    third_party/unity_uabe/AssetsTools/ClassDatabaseFile.cpp
+    src/uabe/AssetsTools/AssetBundleFileFormat.cpp
+    src/uabe/AssetsTools/AssetBundleFileTable.cpp
+    src/uabe/AssetsTools/AssetsFileFormat.cpp
+    src/uabe/AssetsTools/AssetsFileReader.cpp
+    src/uabe/AssetsTools/AssetsFileTable.cpp
+    src/uabe/AssetsTools/AssetsReplacer.cpp
+    src/uabe/AssetsTools/AssetTypeClass.cpp
+    src/uabe/AssetsTools/BundleReplacer.cpp
+    src/uabe/AssetsTools/ClassDatabaseFile.cpp
 )
-target_include_directories(maiconv_uabe_assetstools PUBLIC third_party/unity_uabe/AssetsTools)
+target_include_directories(maiconv_uabe_assetstools PUBLIC include)
+target_include_directories(maiconv_uabe_assetstools PRIVATE src/uabe/AssetsTools)
 target_compile_definitions(maiconv_uabe_assetstools PUBLIC
     ASSETSTOOLS_IMPORTSTATIC
     UNICODE
@@ -166,28 +169,32 @@ add_library(MaiConv_core
     src/core/format.cpp
     src/core/io.cpp
     src/core/ma2.cpp
-    src/core/media.cpp
+    src/core/media_audio.cpp
+    src/core/media_cover.cpp
+    src/core/media_video.cpp
     src/core/unity_assetbundle.cpp
-    src/core/simai.cpp
+    src/core/simai_tokenizer.cpp
+    src/core/simai_parser.cpp
+    src/core/simai_compiler.cpp
     src/core/assets.cpp
-    third_party/unity_uabe/Texture/lodepng.cpp
+    src/uabe/Texture/lodepng.cpp
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
     set_source_files_properties(
-        third_party/unity_uabe/Texture/lodepng.cpp
+        src/uabe/Texture/lodepng.cpp
         PROPERTIES
         COMPILE_OPTIONS "-w"
     )
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set_source_files_properties(
-        third_party/unity_uabe/Texture/lodepng.cpp
+        src/uabe/Texture/lodepng.cpp
         PROPERTIES
         COMPILE_OPTIONS "-w"
     )
 elseif(MSVC)
     set_source_files_properties(
-        third_party/unity_uabe/Texture/lodepng.cpp
+        src/uabe/Texture/lodepng.cpp
         PROPERTIES
         COMPILE_OPTIONS "/w"
     )
@@ -195,8 +202,6 @@ endif()
 
 target_include_directories(MaiConv_core PUBLIC include)
 target_include_directories(MaiConv_core PRIVATE
-    third_party/unity_uabe/AssetsTools
-    third_party/unity_uabe/Texture
     third_party
 )
 target_compile_definitions(MaiConv_core PRIVATE

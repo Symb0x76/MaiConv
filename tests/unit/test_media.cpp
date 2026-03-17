@@ -1,4 +1,6 @@
-#include "maiconv/core/media.hpp"
+#include "maiconv/core/media/media_audio.hpp"
+#include "maiconv/core/media/media_cover.hpp"
+#include "maiconv/core/media/media_video.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 

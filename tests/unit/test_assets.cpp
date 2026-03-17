@@ -1,6 +1,6 @@
 #include "maiconv/core/assets.hpp"
 #include "maiconv/core/io.hpp"
-#include "maiconv/core/simai.hpp"
+#include "maiconv/core/simai/tokenizer.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -1577,7 +1577,7 @@ TEST_CASE("assets maidata normalizes genre labels and preserves special title "
   REQUIRE(maidata.find("&title=Rock & Roll? [DX]") != std::string::npos);
   REQUIRE(maidata.find("&genre=ゲーム&バラエティ") != std::string::npos);
 
-  SimaiTokenizer tokenizer;
+  simai::Tokenizer tokenizer;
   const auto doc = tokenizer.parse_document(maidata);
   REQUIRE(doc.metadata.at("title") == "Rock & Roll? [DX]");
   REQUIRE(doc.metadata.at("genre") == "ゲーム&バラエティ");
