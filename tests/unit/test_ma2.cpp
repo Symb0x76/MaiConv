@@ -32,5 +32,5 @@ TEST_CASE("ma2 compose roundtrip") {
   Ma2Composer composer;
   Chart chart = parser.parse(lines);
   const std::string out = composer.compose(chart, ChartFormat::Ma2_103);
-  REQUIRE(out.find("NMTAP") != std::string::npos);
+  REQUIRE(out.find("TAP") != std::string::npos);
 }

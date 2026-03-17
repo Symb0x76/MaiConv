@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -188,6 +190,242 @@ std::string prefixed_type(const Note& note) {
   return prefix + base_ma2_type(note.type);
 }
 
+std::string ma2_type_for_format(const Note& note, ChartFormat format) {
+  if (format == ChartFormat::Ma2_103) {
+    const bool is_slide_start = note.type == NoteType::SlideStart;
+    if (note.type == NoteType::Tap || note.type == NoteType::SlideStart) {
+      if (note.state == SpecialState::Ex) {
+        return is_slide_start ? "XST" : "XTP";
+      }
+      if (note.state == SpecialState::Break || note.state == SpecialState::BreakEx) {
+        return is_slide_start ? "BST" : "BRK";
+      }
+      return is_slide_start ? "STR" : "TAP";
+    }
+
+    if (note.type == NoteType::Hold) {
+      if (note.state == SpecialState::Ex || note.state == SpecialState::BreakEx) {
+        return "XHO";
+      }
+      return "HLD";
+    }
+
+    if (note.type == NoteType::TouchTap) {
+      return "TTP";
+    }
+
+    if (note.type == NoteType::TouchHold) {
+      return "THO";
+    }
+
+    return base_ma2_type(note.type);
+  }
+
+  return prefixed_type(note);
+}
+
+struct Ma2Stats {
+  int normal_tap = 0;
+  int break_tap = 0;
+  int ex_tap = 0;
+  int break_ex_tap = 0;
+  int normal_hold = 0;
+  int ex_hold = 0;
+  int break_hold = 0;
+  int break_ex_hold = 0;
+  int normal_slide_start = 0;
+  int break_slide_start = 0;
+  int ex_slide_start = 0;
+  int break_ex_slide_start = 0;
+  int touch_tap = 0;
+  int touch_hold = 0;
+  int normal_slide = 0;
+  int break_slide = 0;
+  int all_note_rec = 0;
+  int each_pairs = 0;
+};
+
+bool is_tap_genre_type(NoteType type) {
+  return type == NoteType::Tap || type == NoteType::SlideStart ||
+         type == NoteType::TouchTap;
+}
+
+bool is_hold_genre_type(NoteType type) {
+  return type == NoteType::Hold || type == NoteType::TouchHold;
+}
+
+Ma2Stats compute_ma2_stats(const Chart& chart) {
+  Ma2Stats stats;
+  std::map<int, int> each_pairs_by_stamp;
+
+  for (const auto& note : chart.notes()) {
+    if (!note.is_note()) {
+      continue;
+    }
+
+    if (note.state != SpecialState::ConnectingSlide) {
+      ++stats.all_note_rec;
+    }
+
+    if (is_tap_genre_type(note.type) || is_hold_genre_type(note.type)) {
+      ++each_pairs_by_stamp[note.tick_stamp(chart.definition())];
+    }
+
+    if (note.type == NoteType::Tap) {
+      if (note.state == SpecialState::Break) {
+        ++stats.break_tap;
+      } else if (note.state == SpecialState::Ex) {
+        ++stats.ex_tap;
+      } else if (note.state == SpecialState::BreakEx) {
+        ++stats.break_ex_tap;
+      } else {
+        ++stats.normal_tap;
+      }
+      continue;
+    }
+
+    if (note.type == NoteType::SlideStart) {
+      if (note.state == SpecialState::Break) {
+        ++stats.break_slide_start;
+      } else if (note.state == SpecialState::Ex) {
+        ++stats.ex_slide_start;
+      } else if (note.state == SpecialState::BreakEx) {
+        ++stats.break_ex_slide_start;
+      } else {
+        ++stats.normal_slide_start;
+      }
+      continue;
+    }
+
+    if (note.type == NoteType::TouchTap) {
+      ++stats.touch_tap;
+      continue;
+    }
+
+    if (note.type == NoteType::Hold) {
+      if (note.state == SpecialState::Break) {
+        ++stats.break_hold;
+      } else if (note.state == SpecialState::Ex) {
+        ++stats.ex_hold;
+      } else if (note.state == SpecialState::BreakEx) {
+        ++stats.break_ex_hold;
+      } else {
+        ++stats.normal_hold;
+      }
+      continue;
+    }
+
+    if (note.type == NoteType::TouchHold) {
+      ++stats.touch_hold;
+      continue;
+    }
+
+    if (is_slide_type(note.type)) {
+      if (note.state == SpecialState::Break) {
+        ++stats.break_slide;
+      } else if (note.state == SpecialState::Normal) {
+        ++stats.normal_slide;
+      }
+    }
+  }
+
+  for (const auto& [stamp, count] : each_pairs_by_stamp) {
+    (void)stamp;
+    if (count > 1) {
+      ++stats.each_pairs;
+    }
+  }
+  return stats;
+}
+
+std::string compose_ma2_statistics(const Chart& chart, ChartFormat format) {
+  const Ma2Stats stats = compute_ma2_stats(chart);
+  const bool include_104 = (format == ChartFormat::Ma2_104);
+
+  const int tap_num =
+      stats.normal_tap + stats.ex_tap + stats.normal_slide_start +
+      stats.ex_slide_start + stats.touch_tap;
+  const int break_num =
+      stats.break_tap + stats.break_ex_tap + stats.break_hold +
+      stats.break_ex_hold + stats.break_slide_start +
+      stats.break_ex_slide_start + stats.break_slide;
+  const int hold_num = stats.normal_hold + stats.ex_hold + stats.touch_hold;
+  const int slide_num = stats.normal_slide;
+  const int all_note_num = tap_num + break_num + hold_num + slide_num;
+
+  const int tap_judge_num =
+      tap_num + stats.break_tap + stats.break_ex_tap +
+      stats.break_slide_start + stats.break_ex_slide_start;
+  const int hold_judge_num =
+      (hold_num + stats.break_hold + stats.break_ex_hold) * 2;
+  const int slide_judge_num = stats.normal_slide + stats.break_slide;
+  const int all_judge_num = tap_judge_num + hold_judge_num + slide_judge_num;
+
+  const int tap_score = tap_num * 500;
+  const int break_score = break_num * 2600;
+  const int hold_score = hold_num * 1000;
+  const int slide_score = slide_num * 1500;
+  const int all_score = tap_score + break_score + hold_score + slide_score;
+  const int score_s = static_cast<int>(std::llround(all_score * 0.97));
+  const int score_ss = static_cast<int>(std::llround(all_score * 0.99));
+  const int rated_achievement =
+      all_score == 0
+          ? 10000
+          : static_cast<int>(
+                std::llround((1.0 + (static_cast<double>(break_num) * 100.0) /
+                                      static_cast<double>(all_score)) *
+                             10000.0));
+
+  std::ostringstream out;
+  out << "T_REC_TAP\t" << stats.normal_tap << "\n";
+  out << "T_REC_BRK\t" << stats.break_tap << "\n";
+  out << "T_REC_XTP\t" << stats.ex_tap << "\n";
+  if (include_104) {
+    out << "T_REC_BXX\t" << stats.break_ex_tap << "\n";
+  }
+  out << "T_REC_HLD\t" << stats.normal_hold << "\n";
+  out << "T_REC_XHO\t" << stats.ex_hold << "\n";
+  if (include_104) {
+    out << "T_REC_BHO\t" << stats.break_hold << "\n";
+    out << "T_REC_BXH\t" << stats.break_ex_hold << "\n";
+  }
+  out << "T_REC_STR\t" << stats.normal_slide_start << "\n";
+  out << "T_REC_BST\t" << stats.break_slide_start << "\n";
+  out << "T_REC_XST\t" << stats.ex_slide_start << "\n";
+  if (include_104) {
+    out << "T_REC_XBS\t" << stats.break_ex_slide_start << "\n";
+  }
+  out << "T_REC_TTP\t" << stats.touch_tap << "\n";
+  out << "T_REC_THO\t" << stats.touch_hold << "\n";
+  out << "T_REC_SLD\t" << stats.normal_slide << "\n";
+  if (include_104) {
+    out << "T_REC_BSL\t" << stats.break_slide << "\n";
+  }
+  out << "T_REC_ALL\t" << stats.all_note_rec << "\n";
+
+  out << "T_NUM_TAP\t" << tap_num << "\n";
+  out << "T_NUM_BRK\t" << break_num << "\n";
+  out << "T_NUM_HLD\t" << hold_num << "\n";
+  out << "T_NUM_SLD\t" << slide_num << "\n";
+  out << "T_NUM_ALL\t" << all_note_num << "\n";
+
+  out << "T_JUDGE_TAP\t" << tap_judge_num << "\n";
+  out << "T_JUDGE_HLD\t" << hold_judge_num << "\n";
+  out << "T_JUDGE_SLD\t" << slide_judge_num << "\n";
+  out << "T_JUDGE_ALL\t" << all_judge_num << "\n";
+
+  out << "TTM_EACHPAIRS\t" << stats.each_pairs << "\n";
+  out << "TTM_SCR_TAP\t" << tap_score << "\n";
+  out << "TTM_SCR_BRK\t" << break_score << "\n";
+  out << "TTM_SCR_HLD\t" << hold_score << "\n";
+  out << "TTM_SCR_SLD\t" << slide_score << "\n";
+  out << "TTM_SCR_ALL\t" << all_score << "\n";
+  out << "TTM_SCR_S\t" << score_s << "\n";
+  out << "TTM_SCR_SS\t" << score_ss << "\n";
+  out << "TTM_RAT_ACV\t" << rated_achievement << "\n";
+  return out.str();
+}
+
 }  // namespace
 
 std::vector<std::string> Ma2Tokenizer::tokenize_file(const std::filesystem::path& path) const {
@@ -276,6 +514,9 @@ Chart Ma2Parser::parse(const std::vector<std::string>& lines) const {
       if (fields.size() >= 6) {
         note.special_effect = to_int(fields[5]) == 1;
       }
+      if (fields.size() >= 7) {
+        note.touch_size = fields[6];
+      }
     } else if (note.type == NoteType::Hold) {
       if (fields.size() >= 5) {
         note.last_ticks = to_int(fields[4]);
@@ -290,6 +531,9 @@ Chart Ma2Parser::parse(const std::vector<std::string>& lines) const {
       }
       if (fields.size() >= 7) {
         note.special_effect = to_int(fields[6]) == 1;
+      }
+      if (fields.size() >= 8) {
+        note.touch_size = fields[7];
       }
     } else if (is_slide_type(note.type)) {
       if (fields.size() >= 5) {
@@ -314,30 +558,72 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
   Chart chart = source;
   chart.normalize();
 
+  std::vector<BpmChange> deduped_bpms;
+  deduped_bpms.reserve(chart.bpm_changes().size());
+  for (const auto& bpm : chart.bpm_changes()) {
+    if (!deduped_bpms.empty()) {
+      const auto& prev = deduped_bpms.back();
+      if (prev.bar == bpm.bar && prev.tick == bpm.tick && prev.bpm == bpm.bpm) {
+        continue;
+      }
+    }
+    deduped_bpms.push_back(bpm);
+  }
+  if (deduped_bpms.empty()) {
+    deduped_bpms.push_back(BpmChange{0, 0, 120.0});
+  }
+
   std::ostringstream out;
   const std::string version = (format == ChartFormat::Ma2_104) ? "1.04.00" : "1.03.00";
-  out << "VERSION\t" << version << "\n";
-  out << "FES_MODE\t" << ((format == ChartFormat::Ma2_104) ? "1" : "0") << "\n";
+  out << "VERSION\t0.00.00\t" << version << "\n";
+  out << "FES_MODE\t0\n";
 
-  const auto first_bpm = chart.bpm_changes().empty() ? BpmChange{0, 0, 120.0} : chart.bpm_changes().front();
-  out << "BPM_DEF\t" << first_bpm.bar << "\t" << first_bpm.tick << "\t" << first_bpm.bpm << "\n";
+  const auto first_bpm = deduped_bpms.front();
+  double bpm_def_values[4] = {
+      first_bpm.bpm,
+      first_bpm.bpm,
+      first_bpm.bpm,
+      first_bpm.bpm,
+  };
+  for (std::size_t i = 0; i < deduped_bpms.size() && i < 4; ++i) {
+    bpm_def_values[i] = deduped_bpms[i].bpm;
+  }
+  out << "BPM_DEF\t" << std::fixed << std::setprecision(3) << bpm_def_values[0] << "\t"
+      << bpm_def_values[1] << "\t" << bpm_def_values[2] << "\t" << bpm_def_values[3] << "\t\n";
+  out.unsetf(std::ios::floatfield);
+  out << std::setprecision(6);
 
   const auto first_measure = chart.measure_changes().empty() ? MeasureChange{0, 0, 4, 4} : chart.measure_changes().front();
-  out << "MET_DEF\t" << first_measure.bar << "\t" << first_measure.tick << "\t" << first_measure.quaver << "\t"
-      << first_measure.beats << "\n";
+  out << "MET_DEF\t" << first_measure.quaver << "\t" << first_measure.beats << "\n";
+  out << "RESOLUTION\t" << chart.definition() << "\n";
+  out << "CLK_DEF\t" << chart.definition() << "\n";
+  out << "COMPATIBLE_CODE\tMA2\n\n";
 
-  for (std::size_t i = 1; i < chart.bpm_changes().size(); ++i) {
-    const auto& bpm = chart.bpm_changes()[i];
+  for (std::size_t i = 0; i < deduped_bpms.size(); ++i) {
+    const auto& bpm = deduped_bpms[i];
     out << "BPM\t" << bpm.bar << "\t" << bpm.tick << "\t" << bpm.bpm << "\n";
   }
 
-  for (std::size_t i = 1; i < chart.measure_changes().size(); ++i) {
+  bool has_prev_measure = false;
+  MeasureChange prev_measure{};
+  for (std::size_t i = 0; i < chart.measure_changes().size(); ++i) {
     const auto& measure = chart.measure_changes()[i];
+    const bool duplicate = has_prev_measure && measure.bar == prev_measure.bar &&
+                           measure.tick == prev_measure.tick &&
+                           measure.quaver == prev_measure.quaver &&
+                           measure.beats == prev_measure.beats;
+    if (duplicate) {
+      continue;
+    }
     out << "MET\t" << measure.bar << "\t" << measure.tick << "\t" << measure.quaver << "\t" << measure.beats << "\n";
+    prev_measure = measure;
+    has_prev_measure = true;
   }
 
+  out << "\n";
+
   for (const auto& note : chart.notes()) {
-    const std::string type = prefixed_type(note);
+    const std::string type = ma2_type_for_format(note, format);
     out << type << "\t" << note.bar << "\t" << note.tick << "\t" << note.key;
 
     if (note.type == NoteType::TouchTap) {
@@ -347,12 +633,16 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
       out << "\t" << note.last_ticks;
     } else if (note.type == NoteType::TouchHold) {
       out << "\t" << note.last_ticks << "\t" << (note.touch_group.empty() ? "C" : note.touch_group) << "\t"
-          << (note.special_effect ? 1 : 0) << "\tM1";
+          << (note.special_effect ? 1 : 0) << "\t" << (note.touch_size.empty() ? "M1" : note.touch_size);
     } else if (is_slide_type(note.type)) {
       out << "\t" << note.wait_ticks << "\t" << note.last_ticks << "\t" << note.end_key;
     }
     out << "\n";
   }
+
+  out << "\n";
+  out << compose_ma2_statistics(chart, format);
+  out << "\n";
 
   return out.str();
 }

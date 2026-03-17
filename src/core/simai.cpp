@@ -304,9 +304,9 @@ namespace maiconv
 
     std::string slide_notation(NoteType type, int start_key, int end_key)
     {
-      static_cast<void>(end_key);
       const bool outer_start =
           start_key == 0 || start_key == 1 || start_key == 6 || start_key == 7;
+      static_cast<void>(end_key);
       switch (type)
       {
       case NoteType::SlideStraight:
@@ -316,15 +316,17 @@ namespace maiconv
       case NoteType::SlideWifi:
         return "w";
       case NoteType::SlideCurveLeft:
-      {
-        // Keep curve glyph selection aligned with MaiLib/MaiChartManager:
-        // outer starts use '<', inner starts use '>'.
-        return outer_start ? "<" : ">";
-      }
+        if (outer_start)
+        {
+          return "<";
+        }
+        return ">";
       case NoteType::SlideCurveRight:
-      {
-        return outer_start ? ">" : "<";
-      }
+        if (outer_start)
+        {
+          return ">";
+        }
+        return "<";
       case NoteType::SlideP:
         return "q";
       case NoteType::SlidePP:
@@ -473,12 +475,6 @@ namespace maiconv
                                   chart.ticks_to_seconds(start_tick + resolved_wait);
       return "[" + format_decimal_compact(wait_sec) + "##" +
              format_decimal_compact(duration_sec) + "]";
-    }
-
-    std::string format_chained_slide_duration(const Chart &chart, int start_tick,
-                                              const Note &note)
-    {
-      return format_slide_duration(chart, start_tick, note);
     }
 
     std::string format_hold_duration(const Chart &chart, int start_tick,
@@ -1666,15 +1662,6 @@ namespace maiconv
 
     const auto render_chain_branch = [&](const ChainRef &ref) -> std::string
     {
-      if (ref.has_continuation && ref.compact_enabled)
-      {
-        Note compact_note;
-        compact_note.wait_ticks = std::max(0, ref.compact_wait_ticks);
-        compact_note.last_ticks = std::max(0, ref.compact_last_ticks);
-        return ref.compact_path +
-               format_slide_duration(chart, ref.origin_stamp, compact_note) +
-               (ref.compact_has_break ? "b" : "");
-      }
       return ref.expanded_body;
     };
 
@@ -1815,7 +1802,6 @@ namespace maiconv
     const DelayBounds delay_bounds = estimate_delay_bounds_like_mailib(chart);
     int max_note_bar = delay_bounds.max_bar;
     int max_note_end_tick = delay_bounds.max_end_tick;
-    const bool has_note = delay_bounds.has_note;
 
     for (const auto &bpm : chart.bpm_changes())
     {
@@ -1895,6 +1881,12 @@ namespace maiconv
       }
       else if (is_slide_type(note.type))
       {
+        const SpecialState effective_slide_state =
+          inherited_slide_start_state != SpecialState::Normal
+            ? inherited_slide_start_state
+            : note.state;
+        const std::string effective_state =
+          state_suffix(effective_slide_state);
         const auto anchor_it =
             slide_start_index_by_stamp_key.find({ts, note.key});
         if (anchor_it != slide_start_index_by_stamp_key.end())
@@ -1902,9 +1894,7 @@ namespace maiconv
           order_hint = std::min(order_hint, anchor_it->second);
         }
 
-        const auto chain_handle =
-            note.state == SpecialState::ConnectingSlide ? find_open_chain(note)
-                                                        : std::nullopt;
+        const auto chain_handle = find_open_chain(note);
         const int display_start_key =
             chain_handle.has_value()
                 ? slide_bundles[chain_handle->bundle_index]
@@ -1914,9 +1904,9 @@ namespace maiconv
         const std::string notation =
             slide_notation(note.type, display_start_key, note.end_key);
         const std::string segment_path = notation + std::to_string(note.end_key + 1);
-        const std::string segment_state = state_suffix(note.state);
+        const std::string segment_state;
         const std::string segment_duration = format_slide_duration(chart, ts, note);
-        const bool note_has_break = note.state == SpecialState::Break;
+        const bool note_has_break = effective_slide_state == SpecialState::Break;
         const auto bundle_key = std::make_pair(ts, display_start_key);
 
         if (!chain_handle.has_value() &&
@@ -1948,14 +1938,17 @@ namespace maiconv
         }
 
         if (chain_handle.has_value() &&
-            note.state == SpecialState::ConnectingSlide)
+          (note.state == SpecialState::ConnectingSlide ||
+           note.state == SpecialState::Normal))
         {
           auto &bundle = slide_bundles[chain_handle->bundle_index];
           auto &ref = bundle.branches[chain_handle->branch_index];
+            Note chained_note = note;
+            chained_note.state = SpecialState::ConnectingSlide;
           ref.compact_path += segment_path;
           ref.expanded_body +=
-              segment_path + segment_state +
-              format_chained_slide_duration(chart, ts, note);
+              "*" + segment_path + segment_state +
+              format_slide_duration(chart, ts, chained_note);
           ref.compact_last_ticks += std::max(0, note.last_ticks);
           ref.has_continuation = true;
           ref.compact_has_break = ref.compact_has_break || note_has_break;
@@ -1976,14 +1969,7 @@ namespace maiconv
         }
 
         std::string bundle_prefix = std::to_string(display_start_key + 1);
-        if (matching_slide_start_state.has_value())
-        {
-          bundle_prefix += inherited_state;
-        }
-        else
-        {
-          bundle_prefix += "?";
-        }
+        bundle_prefix += effective_state;
         token = bundle_prefix + segment_path + segment_state + segment_duration;
         created_slide_bundle = SlideBundle{
             ts,
@@ -2043,12 +2029,43 @@ namespace maiconv
     }
 
     std::string out;
-    const int stored_bar_count = std::max(1, max_note_bar + 1);
-    const int total_delay =
-        has_note ? (max_note_end_tick - stored_bar_count * def) : 0;
-    const int delay_bar = total_delay / def + 2;
-    const int trailing_empty_bar_count = std::max(0, delay_bar + 1);
-    const int last_bar = max_note_bar + trailing_empty_bar_count;
+    int max_note_start_tick = -1;
+    bool last_start_has_slide = false;
+    bool last_start_has_non_slide = false;
+    for (const auto &note : chart.notes())
+    {
+      const int start_tick = note.tick_stamp(def);
+      if (start_tick > max_note_start_tick)
+      {
+        max_note_start_tick = start_tick;
+        last_start_has_slide = is_slide_type(note.type);
+        last_start_has_non_slide = !is_slide_type(note.type);
+      }
+      else if (start_tick == max_note_start_tick)
+      {
+        if (is_slide_type(note.type))
+        {
+          last_start_has_slide = true;
+        }
+        else
+        {
+          last_start_has_non_slide = true;
+        }
+      }
+    }
+
+    int last_bar = max_note_end_tick > 0 ? std::max(0, max_note_end_tick / def) : 0;
+    if (max_note_start_tick >= 0)
+    {
+      const int last_note_bar = max_note_start_tick / def;
+      const int trailing_padding_bars =
+          (last_start_has_slide && !last_start_has_non_slide) ? 2 : 3;
+      last_bar = last_note_bar + trailing_padding_bars;
+    }
+    else if (max_note_end_tick > 0)
+    {
+      last_bar += 2;
+    }
     out.reserve(static_cast<std::size_t>(std::max(1, last_bar + 1)) * 96U);
     for (int bar = 0; bar <= last_bar; ++bar)
     {

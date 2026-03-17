@@ -6,14 +6,16 @@
 
 using namespace maiconv;
 
-TEST_CASE("simai tokenizer handles inote document") {
+TEST_CASE("simai tokenizer handles inote document")
+{
   SimaiTokenizer tokenizer;
   const auto doc = tokenizer.parse_document("&title=x&inote_3=(120)1,2,3,");
   REQUIRE(doc.chart_tokens.count(3) == 1);
   REQUIRE(doc.chart_tokens.at(3).size() >= 3);
 }
 
-TEST_CASE("simai parser basic notes") {
+TEST_CASE("simai parser basic notes")
+{
   SimaiTokenizer tokenizer;
   SimaiParser parser;
   const auto tokens = tokenizer.tokenize_text("(120){4}1,2h[4:1],3-5[16:1],");
@@ -21,7 +23,8 @@ TEST_CASE("simai parser basic notes") {
   REQUIRE(chart.notes().size() >= 3);
 }
 
-TEST_CASE("simai cross-bpm slide duration uses action bpm") {
+TEST_CASE("simai cross-bpm slide duration uses action bpm")
+{
   SimaiTokenizer tokenizer;
   SimaiParser parser;
   const auto tokens = tokenizer.tokenize_text("(199)1-2[16:1],(12.4375),,");
@@ -32,7 +35,8 @@ TEST_CASE("simai cross-bpm slide duration uses action bpm") {
   REQUIRE(slide.last_ticks <= 2);
 }
 
-TEST_CASE("simai compose can be parsed back") {
+TEST_CASE("simai compose can be parsed back")
+{
   SimaiTokenizer tokenizer;
   SimaiParser parser;
   SimaiComposer composer;
@@ -45,7 +49,8 @@ TEST_CASE("simai compose can be parsed back") {
 }
 
 TEST_CASE(
-    "simai compose emits canonical maidata style bars and beat durations") {
+    "simai compose emits canonical maidata style bars and beat durations")
+{
   SimaiTokenizer tokenizer;
   SimaiParser parser;
   SimaiComposer composer;
@@ -62,7 +67,8 @@ TEST_CASE(
   REQUIRE(simai.ends_with("E"));
 }
 
-TEST_CASE("simai tokenizer preserves ampersands in line-based metadata") {
+TEST_CASE("simai tokenizer preserves ampersands in line-based metadata")
+{
   SimaiTokenizer tokenizer;
   const std::string doc_text =
       "&title=Rock & "
@@ -73,7 +79,8 @@ TEST_CASE("simai tokenizer preserves ampersands in line-based metadata") {
   REQUIRE(doc.chart_tokens.count(2) == 1);
 }
 
-TEST_CASE("simai tokenizer preserves ampersands in compact maidata metadata") {
+TEST_CASE("simai tokenizer preserves ampersands in compact maidata metadata")
+{
   SimaiTokenizer tokenizer;
   const std::string doc_text =
       "&title=Rock & Roll? [DX]&genre=ゲーム&バラエティ&inote_2=(120){4}1,2,3,4,E";
@@ -85,7 +92,8 @@ TEST_CASE("simai tokenizer preserves ampersands in compact maidata metadata") {
   REQUIRE_FALSE(doc.chart_tokens.at(2).empty());
 }
 
-TEST_CASE("simai tokenizer supports compact maidata without first ampersand") {
+TEST_CASE("simai tokenizer supports compact maidata without first ampersand")
+{
   SimaiTokenizer tokenizer;
   const std::string doc_text =
       "title=No Prefix&inote_3=(120){4}1,2,3,4,E";
@@ -97,7 +105,8 @@ TEST_CASE("simai tokenizer supports compact maidata without first ampersand") {
 }
 
 TEST_CASE("simai tokenizer strips supported comments while keeping # in "
-          "duration tags") {
+          "duration tags")
+{
   SimaiTokenizer tokenizer;
   const std::string text =
       "(120){4}1,2,3,||drop this line\n4,#drop this comment\n5h[1#2],6,\nE";
@@ -105,13 +114,13 @@ TEST_CASE("simai tokenizer strips supported comments while keeping # in "
 
   REQUIRE(std::find(tokens.begin(), tokens.end(), "4") != tokens.end());
   REQUIRE(std::find(tokens.begin(), tokens.end(), "5h[1#2]") != tokens.end());
-  REQUIRE(std::none_of(tokens.begin(), tokens.end(), [](const std::string &t) {
-    return t.find("drop") != std::string::npos || t.find("||") != std::string::npos;
-  }));
+  REQUIRE(std::none_of(tokens.begin(), tokens.end(), [](const std::string &t)
+                       { return t.find("drop") != std::string::npos || t.find("||") != std::string::npos; }));
 }
 
 TEST_CASE("simai tokenizer applies compatibility fixes from external import "
-          "workflows") {
+          "workflows")
+{
   SimaiTokenizer tokenizer;
   const std::string text = "1{4},2(120),3qx4,5[16-3],6-?7[4:1],8[4:1]b,";
   const auto tokens = tokenizer.tokenize_text(text);
@@ -126,12 +135,14 @@ TEST_CASE("simai tokenizer applies compatibility fixes from external import "
   REQUIRE(std::find(tokens.begin(), tokens.end(), "8b[4:1]") != tokens.end());
 }
 
-TEST_CASE("simai compose uses real export slide notation mapping") {
+TEST_CASE("simai compose uses real export slide notation mapping")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
 
-  auto add_slide = [&](NoteType type, int key, int end_key, int bar) {
+  auto add_slide = [&](NoteType type, int key, int end_key, int bar)
+  {
     Note note;
     note.type = type;
     note.bar = bar;
@@ -163,7 +174,8 @@ TEST_CASE("simai compose uses real export slide notation mapping") {
 }
 
 TEST_CASE(
-    "simai compose merges ex slide starts and chains contiguous slides") {
+    "simai compose merges ex slide starts and chains contiguous slides")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -200,7 +212,8 @@ TEST_CASE(
   REQUIRE(simai.find("2x_/") == std::string::npos);
 }
 
-TEST_CASE("simai compose merges simultaneous ex slide starts into q-slides") {
+TEST_CASE("simai compose merges simultaneous ex slide starts into q-slides")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -244,7 +257,8 @@ TEST_CASE("simai compose merges simultaneous ex slide starts into q-slides") {
 }
 
 TEST_CASE(
-    "simai compose chains connecting slides that keep original ma2 start key") {
+    "simai compose chains connecting slides that keep original ma2 start key")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -276,7 +290,8 @@ TEST_CASE(
 }
 
 TEST_CASE("simai compose inherits special slide starts without emitting "
-          "underscore token") {
+          "underscore token")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -299,12 +314,13 @@ TEST_CASE("simai compose inherits special slide starts without emitting "
   SimaiComposer composer;
   const std::string simai = composer.compose_chart(chart);
 
-  REQUIRE(simai.find("6b<4[") != std::string::npos);
+  REQUIRE(simai.find("6b>4[") != std::string::npos);
   REQUIRE(simai.find("6b_/") == std::string::npos);
 }
 
 TEST_CASE("simai compose orders touch and regular notes before slides in "
-          "shared slot") {
+          "shared slot")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -337,7 +353,8 @@ TEST_CASE("simai compose orders touch and regular notes before slides in "
   REQUIRE(simai.find("{1}E5/8/7-3[8:1],\n") != std::string::npos);
 }
 
-TEST_CASE("simai compose repeats break suffix for slides ending on 1 or 8") {
+TEST_CASE("simai compose does not repeat break suffix on slide end key")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -365,12 +382,13 @@ TEST_CASE("simai compose repeats break suffix for slides ending on 1 or 8") {
   SimaiComposer composer;
   const std::string simai = composer.compose_chart(chart);
 
-  REQUIRE(simai.find("{1}4b-8b[8:1],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}8b<1b[8:1],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}4b-8[8:1],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}8b<1[8:1],\n") != std::string::npos);
 }
 
 TEST_CASE(
-    "simai compose keeps three trailing empty bars after non-slide endings") {
+    "simai compose keeps three trailing empty bars after non-slide endings")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});
@@ -387,7 +405,8 @@ TEST_CASE(
   REQUIRE(simai.ends_with("{1}1,\n{1},\n{1},\n{1},\nE"));
 }
 
-TEST_CASE("simai compose keeps two trailing empty bars after slide endings") {
+TEST_CASE("simai compose keeps two trailing empty bars after slide endings")
+{
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 185.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 1, 1});

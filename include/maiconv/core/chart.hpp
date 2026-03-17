@@ -43,6 +43,7 @@ struct Note {
   bool special_effect = false;
   bool is_touch = false;
   std::string touch_group;
+  std::string touch_size = "M1";
   std::string ma2_raw_type;
 
   [[nodiscard]] int tick_stamp(int definition = 384) const {
