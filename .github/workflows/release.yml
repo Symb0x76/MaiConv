@@ -145,13 +145,13 @@ jobs:
           {
             echo "changelog<<$DELIM"
             printf "%s\n" "$INPUT_CHANGELOG"
-            echo "$DELIM"
+            printf "\n%s\n" "$DELIM"
           } >> "$GITHUB_OUTPUT"
         elif [ -f "CHANGELOG.md" ]; then
           {
             echo "changelog<<$DELIM"
             cat CHANGELOG.md
-            echo "$DELIM"
+            printf "\n%s\n" "$DELIM"
           } >> "$GITHUB_OUTPUT"
         else
           echo "changelog=$(git log -1 --pretty=format:'%s')" >> "$GITHUB_OUTPUT"
