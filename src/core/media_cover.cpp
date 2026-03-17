@@ -1,6 +1,6 @@
 #include "maiconv/core/media/media_cover.hpp"
 
-#include "media_shared.hpp"
+#include "maiconv/core/media/media_shared.hpp"
 
 #include <mutex>
 

@@ -1,4 +1,4 @@
-#include "maiconv/core/media.hpp"
+#include "maiconv/core/media/media_shared.hpp"
 
 #include "maiconv/core/io.hpp"
 

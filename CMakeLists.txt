@@ -171,6 +171,7 @@ add_library(MaiConv_core
     src/core/ma2.cpp
     src/core/media_audio.cpp
     src/core/media_cover.cpp
+    src/core/media_shared.cpp
     src/core/media_video.cpp
     src/core/unity_assetbundle.cpp
     src/core/simai_tokenizer.cpp
