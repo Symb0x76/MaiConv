@@ -298,6 +298,64 @@ namespace maiconv
             bool is_utage = false;
         };
 
+        enum class UtagePlayerSide
+        {
+            None = 0,
+            Left,
+            Right
+        };
+
+        bool has_case_insensitive_suffix(std::string_view text, std::string_view suffix)
+        {
+            if (text.size() < suffix.size())
+            {
+                return false;
+            }
+
+            const std::size_t offset = text.size() - suffix.size();
+            for (std::size_t i = 0; i < suffix.size(); ++i)
+            {
+                const unsigned char lhs =
+                    static_cast<unsigned char>(text[offset + i]);
+                const unsigned char rhs =
+                    static_cast<unsigned char>(suffix[i]);
+                if (std::tolower(lhs) != std::tolower(rhs))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        UtagePlayerSide
+        detect_utage_player_side_from_chart(const std::filesystem::path &chart_path)
+        {
+            const std::string lower_name =
+                lower(path_to_generic_utf8(chart_path.filename()));
+            if (has_case_insensitive_suffix(lower_name, "_l.ma2"))
+            {
+                return UtagePlayerSide::Left;
+            }
+            if (has_case_insensitive_suffix(lower_name, "_r.ma2"))
+            {
+                return UtagePlayerSide::Right;
+            }
+            return UtagePlayerSide::None;
+        }
+
+        std::string utage_player_side_suffix(UtagePlayerSide side)
+        {
+            if (side == UtagePlayerSide::Left)
+            {
+                return " (L)";
+            }
+            if (side == UtagePlayerSide::Right)
+            {
+                return " (R)";
+            }
+            return "";
+        }
+
         TrackInfo default_track_info(const std::string &fallback_id)
         {
             TrackInfo info;
@@ -1614,7 +1672,9 @@ namespace maiconv
 #endif
         }
 
-        std::string export_display_title(const TrackInfo &info)
+        std::string
+        export_display_title(const TrackInfo &info,
+                             UtagePlayerSide utage_side = UtagePlayerSide::None)
         {
             std::string title = info.name.empty() ? info.sort_name : info.name;
             title = normalize_maidata_metadata_value(title);
@@ -1628,6 +1688,18 @@ namespace maiconv
                     title += suffix;
                 }
             }
+
+            const std::string side_suffix = utage_player_side_suffix(utage_side);
+            if (info.is_utage && !side_suffix.empty())
+            {
+                if (title.size() < side_suffix.size() ||
+                    title.compare(title.size() - side_suffix.size(), side_suffix.size(),
+                                  side_suffix) != 0)
+                {
+                    title += side_suffix;
+                }
+            }
+
             return title;
         }
 
@@ -1717,7 +1789,8 @@ namespace maiconv
                                const std::filesystem::path &output_path,
                                bool incomplete, bool skipped_existing,
                                AssetsLogLevel log_level,
-                               const std::vector<std::string> &dummy_outputs)
+                               const std::vector<std::string> &dummy_outputs,
+                               UtagePlayerSide utage_side)
         {
             if (log_level == AssetsLogLevel::Quiet)
             {
@@ -1732,7 +1805,7 @@ namespace maiconv
             {
                 std::cout << (incomplete ? "Incomplete: " : "Completed: ");
             }
-            std::cout << info.id << " " << export_display_title(info);
+            std::cout << info.id << " " << export_display_title(info, utage_side);
             if (log_level == AssetsLogLevel::Verbose)
             {
                 std::cout << " -> " << path_to_utf8(output_path);
@@ -1860,10 +1933,11 @@ namespace maiconv
         std::string compose_maidata_document(const TrackInfo &info,
                                              const std::map<int, std::string> &inotes,
                                              bool strict_decimal,
-                                             MaidataLevelMode level_mode)
+                                             MaidataLevelMode level_mode,
+                                             UtagePlayerSide utage_side)
         {
             (void)strict_decimal;
-            const std::string title = export_display_title(info);
+            const std::string title = export_display_title(info, utage_side);
             const std::string artist = normalize_maidata_metadata_value(info.composer);
             std::string genre = normalize_maidata_metadata_value(info.genre);
             if (info.genre_id == "104")
@@ -2105,6 +2179,7 @@ namespace maiconv
             bool emit_track_output = false;
             bool incomplete = false;
             bool skipped_existing = false;
+            UtagePlayerSide utage_side = UtagePlayerSide::None;
             TrackInfo info;
             std::filesystem::path final_track_output;
             std::optional<std::pair<int, std::string>> compiled_track;
@@ -2117,6 +2192,7 @@ namespace maiconv
 
         TrackProcessResult
         process_track_folder(const std::filesystem::path &folder,
+                             UtagePlayerSide forced_utage_side,
                              const AssetsOptions &options,
                              const NumericFilterSet &target_music_filters,
                              const NumericFilterSet &target_difficulty_filters,
@@ -2129,6 +2205,7 @@ namespace maiconv
                              OutputPathMutexPool &output_path_mutex_pool)
         {
             TrackProcessResult result;
+            result.utage_side = forced_utage_side;
             try
             {
                 const std::string folder_name = path_to_utf8(folder.filename());
@@ -2163,6 +2240,11 @@ namespace maiconv
                 else
                 {
                     info = default_track_info(fallback_id);
+                }
+
+                if (!info.is_utage)
+                {
+                    result.utage_side = UtagePlayerSide::None;
                 }
 
                 if (is_reserved_music_id(info.id))
@@ -2206,7 +2288,28 @@ namespace maiconv
                     }
                 }
 
-                std::vector<std::pair<std::filesystem::path, int>> selected_charts;
+                struct SelectedChart
+                {
+                    std::filesystem::path ma2_file;
+                    int output_difficulty = 1;
+                    UtagePlayerSide utage_side = UtagePlayerSide::None;
+                };
+
+                std::vector<SelectedChart> selected_charts;
+                std::set<std::string> selected_chart_keys;
+                const auto append_selected_chart =
+                    [&](const std::filesystem::path &ma2_file, int output_difficulty)
+                {
+                    const std::string dedupe_key =
+                        lower(path_to_generic_utf8(ma2_file.lexically_normal())) + "|" +
+                        std::to_string(output_difficulty);
+                    if (!selected_chart_keys.insert(dedupe_key).second)
+                    {
+                        return;
+                    }
+                    selected_charts.push_back({ma2_file, output_difficulty,
+                                               detect_utage_player_side_from_chart(ma2_file)});
+                };
 
                 if (!info.chart_output_order.empty())
                 {
@@ -2218,26 +2321,43 @@ namespace maiconv
 
                     for (const auto &chart_entry : info.chart_output_order)
                     {
-                        std::filesystem::path resolved;
+                        std::vector<std::filesystem::path> resolved_paths;
 
                         auto found = ma2_by_key.find(chart_entry.chart_file_key);
-                        if (found == ma2_by_key.end())
+                        if (found != ma2_by_key.end())
+                        {
+                            resolved_paths.push_back(found->second);
+                        }
+                        else
                         {
                             const std::string &name = chart_entry.chart_file_key;
                             if (name.size() > 4 &&
                                 name.substr(name.size() - 4) == ".ma2")
                             {
+                                const std::string base_name =
+                                    name.substr(0, name.size() - 4);
                                 const std::string fallback_l_name =
-                                    name.substr(0, name.size() - 4) + "_l.ma2";
-                                found = ma2_by_key.find(fallback_l_name);
+                                    base_name + "_l.ma2";
+                                const std::string fallback_r_name =
+                                    base_name + "_r.ma2";
+
+                                const auto found_l = ma2_by_key.find(fallback_l_name);
+                                if (found_l != ma2_by_key.end())
+                                {
+                                    resolved_paths.push_back(found_l->second);
+                                }
+                                const auto found_r = ma2_by_key.find(fallback_r_name);
+                                if (found_r != ma2_by_key.end())
+                                {
+                                    resolved_paths.push_back(found_r->second);
+                                }
                             }
                         }
 
-                        if (found == ma2_by_key.end())
+                        if (resolved_paths.empty())
                         {
                             continue;
                         }
-                        resolved = found->second;
 
                         if (target_difficulty_filters.active() &&
                             !target_difficulty_filters.matches(
@@ -2245,7 +2365,12 @@ namespace maiconv
                         {
                             continue;
                         }
-                        selected_charts.emplace_back(resolved, chart_entry.output_difficulty);
+
+                        for (const auto &resolved_path : resolved_paths)
+                        {
+                            append_selected_chart(resolved_path,
+                                                  chart_entry.output_difficulty);
+                        }
                     }
                 }
 
@@ -2261,8 +2386,23 @@ namespace maiconv
                         {
                             continue;
                         }
-                        selected_charts.emplace_back(ma2_file, inferred_difficulty);
+                        append_selected_chart(ma2_file, inferred_difficulty);
                     }
+                }
+
+                if (forced_utage_side != UtagePlayerSide::None)
+                {
+                    std::vector<SelectedChart> filtered_charts;
+                    filtered_charts.reserve(selected_charts.size());
+                    for (const auto &chart : selected_charts)
+                    {
+                        if (chart.utage_side == UtagePlayerSide::None ||
+                            chart.utage_side == forced_utage_side)
+                        {
+                            filtered_charts.push_back(chart);
+                        }
+                    }
+                    selected_charts = std::move(filtered_charts);
                 }
 
                 if (selected_charts.empty() && target_difficulty_filters.active())
@@ -2283,10 +2423,13 @@ namespace maiconv
                         append_utf8_path(category_folder, sanitize_folder_name(category));
                 }
 
-                const std::string display_name = export_display_title(info);
+                const std::string display_name =
+                    export_display_title(info, forced_utage_side);
+                const std::string utage_side_suffix =
+                    info.is_utage ? utage_player_side_suffix(forced_utage_side) : "";
                 const auto id_only_track_output = [&]()
                 {
-                    return append_utf8_path(category_folder, info.id);
+                    return append_utf8_path(category_folder, info.id + utage_side_suffix);
                 };
                 std::filesystem::path track_output;
                 bool used_id_folder_fallback = false;
@@ -2388,8 +2531,10 @@ namespace maiconv
                 double longest_chart_seconds = 0.0;
                 std::chrono::steady_clock::duration ma2_duration{};
                 std::chrono::steady_clock::duration write_duration{};
-                for (const auto &[ma2_file, output_difficulty] : selected_charts)
+                for (const auto &selected_chart : selected_charts)
                 {
+                    const auto &ma2_file = selected_chart.ma2_file;
+                    const int output_difficulty = selected_chart.output_difficulty;
                     const auto ma2_begin = std::chrono::steady_clock::now();
                     const auto chart = parser.parse(tokenizer.tokenize_file(ma2_file));
                     Chart transformed = chart;
@@ -2442,7 +2587,8 @@ namespace maiconv
                     const std::string payload =
                         (options.format == ChartFormat::Maidata)
                             ? compose_maidata_document(info, inotes, options.strict_decimal,
-                                                       options.maidata_level_mode)
+                                                       options.maidata_level_mode,
+                                                       forced_utage_side)
                             : compose_simai_document(info, inotes, options.strict_decimal);
                     write_text_file(track_output / "maidata.txt", payload);
                     write_duration += std::chrono::steady_clock::now() - write_begin;
@@ -3112,9 +3258,79 @@ namespace maiconv
                                          path_to_utf8(options.streaming_assets_path));
             }
 
+            struct TrackFolderJob
+            {
+                std::filesystem::path folder;
+                UtagePlayerSide utage_side = UtagePlayerSide::None;
+            };
+
+            std::vector<TrackFolderJob> jobs;
+            jobs.reserve(folders.size() * 2);
+            for (const auto &folder : folders)
+            {
+                bool has_left = false;
+                bool has_right = false;
+                for (const auto &entry : std::filesystem::directory_iterator(folder))
+                {
+                    if (!entry.is_regular_file() ||
+                        lower(path_to_utf8(entry.path().extension())) != ".ma2")
+                    {
+                        continue;
+                    }
+
+                    const UtagePlayerSide side =
+                        detect_utage_player_side_from_chart(entry.path());
+                    has_left = has_left || side == UtagePlayerSide::Left;
+                    has_right = has_right || side == UtagePlayerSide::Right;
+                    if (has_left && has_right)
+                    {
+                        break;
+                    }
+                }
+
+                bool split_lr_jobs = false;
+                if (has_left && has_right)
+                {
+                    const auto xml_path = folder / "Music.xml";
+                    if (std::filesystem::exists(xml_path))
+                    {
+                        bool cache_hit = false;
+                        const TrackInfo parsed =
+                            parse_track_info_cached(xml_path, music_folder_id_key(folder),
+                                                    &cache_hit);
+                        split_lr_jobs = parsed.is_utage;
+                    }
+                }
+
+                if (split_lr_jobs)
+                {
+                    jobs.push_back({folder, UtagePlayerSide::Left});
+                    jobs.push_back({folder, UtagePlayerSide::Right});
+                }
+                else
+                {
+                    jobs.push_back({folder, UtagePlayerSide::None});
+                }
+            }
+
+            std::sort(jobs.begin(), jobs.end(),
+                      [](const TrackFolderJob &lhs, const TrackFolderJob &rhs)
+                      {
+                          const std::string lhs_key =
+                              lower(path_to_generic_utf8(lhs.folder.lexically_normal()));
+                          const std::string rhs_key =
+                              lower(path_to_generic_utf8(rhs.folder.lexically_normal()));
+                          if (lhs_key != rhs_key)
+                          {
+                              return lhs_key < rhs_key;
+                          }
+                          return static_cast<int>(lhs.utage_side) <
+                                 static_cast<int>(rhs.utage_side);
+                      });
+
             const std::size_t worker_count =
-                std::min(folders.size(), static_cast<std::size_t>(options.jobs));
-            std::vector<TrackProcessResult> results(folders.size());
+                std::min(jobs.size(), static_cast<std::size_t>(options.jobs));
+            std::vector<TrackProcessResult> results(jobs.size());
             OutputPathMutexPool output_path_mutex_pool;
             std::mutex progress_output_mutex;
             const auto emit_track_progress_immediately =
@@ -3128,18 +3344,19 @@ namespace maiconv
                     progress_output_mutex);
                 emit_track_output(result.info, result.final_track_output,
                                   result.incomplete, result.skipped_existing,
-                                  options.log_level, result.dummy_outputs);
+                                  options.log_level, result.dummy_outputs,
+                                  result.utage_side);
             };
 
             if (worker_count <= 1)
             {
-                for (std::size_t i = 0; i < folders.size(); ++i)
+                for (std::size_t i = 0; i < jobs.size(); ++i)
                 {
                     results[i] = process_track_folder(
-                        folders[i], options, target_music_filters,
-                        target_difficulty_filters, music_bases, cover_bases, video_bases,
-                        music_indexes, cover_indexes, video_indexes,
-                        output_path_mutex_pool);
+                        jobs[i].folder, jobs[i].utage_side, options,
+                        target_music_filters, target_difficulty_filters, music_bases,
+                        cover_bases, video_bases, music_indexes, cover_indexes,
+                        video_indexes, output_path_mutex_pool);
                     emit_track_progress_immediately(results[i]);
                     if (results[i].fatal_error.has_value())
                     {
@@ -3163,17 +3380,17 @@ namespace maiconv
             }
             const std::size_t index =
                 next_index.fetch_add(1, std::memory_order_relaxed);
-            if (index >= folders.size()) {
+            if (index >= jobs.size()) {
               return;
             }
             if (stop_processing.load(std::memory_order_relaxed)) {
               return;
             }
             results[index] = process_track_folder(
-              folders[index], options, target_music_filters,
-                target_difficulty_filters, music_bases, cover_bases,
-                video_bases, music_indexes, cover_indexes, video_indexes,
-                output_path_mutex_pool);
+              jobs[index].folder, jobs[index].utage_side, options,
+                target_music_filters, target_difficulty_filters, music_bases,
+                cover_bases, video_bases, music_indexes, cover_indexes,
+                video_indexes, output_path_mutex_pool);
             emit_track_progress_immediately(results[index]);
             if (results[index].fatal_error.has_value()) {
               stop_processing.store(true, std::memory_order_relaxed);

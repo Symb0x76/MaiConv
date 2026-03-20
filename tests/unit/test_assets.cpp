@@ -2012,6 +2012,80 @@ TEST_CASE("assets maidata display mode keeps utage chart on slot 7",
   fs::remove_all(temp_root);
 }
 
+
+TEST_CASE("assets splits utage _L/_R charts into distinct L/R outputs",
+          "[assets][maidata]")
+{
+  const fs::path temp_root = unique_temp_dir("assets_utage_lr_split");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  const fs::path track_folder = assets_root / "A045" / "music" / "music101237";
+  fs::create_directories(track_folder);
+  write_text_file(track_folder / "101237_00_L.ma2", sample_ma2());
+  write_text_file(track_folder / "101237_00_R.ma2", sample_ma2());
+
+  const std::string utage_title = "[Utage]Mock Chart LR";
+  const std::string xml =
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+      "<MusicData>\n"
+      "  <name><id>101237</id><str>" +
+      utage_title +
+      "</str></name>\n"
+      "  <artistName><id>1</id><str>" +
+      kMockArtist +
+      "</str></artistName>\n"
+      "  <genreName><id>107</id><str>宴会場</str></genreName>\n"
+      "  <bpm>183</bpm>\n"
+      "  <version>25007</version>\n"
+      "  <AddVersion><id>23</id><str>" +
+      kMockVersion +
+      "</str></AddVersion>\n"
+      "  <notesData>\n"
+      "    "
+      "<Notes><file><path>101237_00.ma2</path></file><level>14</"
+      "level><levelDecimal>7</levelDecimal><musicLevelID>22</"
+      "musicLevelID><notesDesigner><str>" +
+      kMockUtageDesigner +
+      "</str></notesDesigner><isEnable>true</isEnable></Notes>\n"
+      "  </notesData>\n"
+      "  <utageKanjiName><id>0</id><str>" +
+      kMockUtageTag +
+      "</str></utageKanjiName>\n"
+      "  <utagePlayStyle>1</utagePlayStyle>\n"
+      "</MusicData>\n";
+  write_text_file(track_folder / "Music.xml", xml);
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Maidata;
+
+  REQUIRE(run_compile_assets(options) == 0);
+
+  const fs::path left_folder =
+      append_utf8_path(output_root,
+                       "101237_" + sanitize_folder_name(utage_title + " (L)"));
+  const fs::path right_folder =
+      append_utf8_path(output_root,
+                       "101237_" + sanitize_folder_name(utage_title + " (R)"));
+
+  REQUIRE(fs::exists(left_folder / "maidata.txt"));
+  REQUIRE(fs::exists(right_folder / "maidata.txt"));
+
+  const std::string left_maidata = read_text_file(left_folder / "maidata.txt");
+  const std::string right_maidata = read_text_file(right_folder / "maidata.txt");
+
+  REQUIRE(left_maidata.find("&title=" + utage_title + " (L)") !=
+          std::string::npos);
+  REQUIRE(right_maidata.find("&title=" + utage_title + " (R)") !=
+          std::string::npos);
+  REQUIRE(left_maidata.find("&inote_7=") != std::string::npos);
+  REQUIRE(right_maidata.find("&inote_7=") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets can export self-contained streamingassets fixture with "
           "maidata numbering",
           "[assets][maidata]")

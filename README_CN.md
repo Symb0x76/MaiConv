@@ -8,7 +8,7 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 - [ ] 在 `assets` 流程中补齐反向资产导出（目前 `maiconv media` 已支持：`png->ab`、`mp3->acb+awb`、`mp4->dat`）
 - [ ] 实现本地lz4取代对UABE的依赖以提升跨平台性能
-- [ ] 协宴谱分离1P/2P谱面（目前宴谱仍以 `difficulty=7` 的形式与普通谱共存）
+- [x] 宴谱分离 1P/2P 并在输出目录名与 `maidata` 的 `&title=` 追加 `(L)/(R)`
 
 ## 特性
 
@@ -161,6 +161,8 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat 
 - 同时传 `--id` 和 `--difficulty`：只导出命中 id 的命中难度
 - `--id` 和 `--difficulty` 支持逗号分隔多条件，每一项可为数字或正则
 - `--difficulty` 使用导出的 `maidata` 难度编号：普通谱通常是 `2..6`，宴谱是 `7`
+- 对宴谱而言，若同一谱面目录同时存在 `*_L.ma2` 与 `*_R.ma2`，MaiConv 会拆分导出两份结果，并在目录名与 `maidata` `&title=` 追加 `(L)` / `(R)`
+- 对已拆分的宴谱，`--difficulty 7` 会同时命中 `(L)` 与 `(R)` 两份输出
 - `--resume`（`--skip-existing`）会跳过已存在完整导出的曲目；`_Incomplete` 曲目仍会继续尝试补全
 - `--types` 支持逗号分隔：
   `maidata.txt` / `track.mp3` / `bg.png` / `pv.mp4`
@@ -258,6 +260,7 @@ assets 导出时每首歌必含 `maidata.txt`，媒体目标文件名为：
 ```
 
 当源媒体缺失时，`track.mp3`/`bg.png`/`pv.mp4` 可能不存在（除非启用 `--dummy`）。
+对已拆分的宴谱，输出目录会变为 `{id_title} (L)` 与 `{id_title} (R)`，两份 `maidata` 的标题也会带相同后缀。
 
 当源素材是原版游戏格式时，`assets` 的转换策略如下：
 - `acb + awb -> track.mp3`（统一使用外部 `ffmpeg` 转码）

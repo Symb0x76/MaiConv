@@ -6,7 +6,7 @@
 
 - [x] 本地化替换 LZ4（解码 + 编码）
 - [ ] 在 assets 工作流中补齐反向导出（png->ab、mp3->acb+awb、mp4->dat）
-- [ ] Utage 1P/2P 分离，并在输出名称与 title 元数据追加 (1P)/(2P)
+- [x] Utage L/R 分离，并在输出名称与 title 元数据（metadata）追加 (L)/(R)
 
 ## Milestone A: 契约冻结与设计基线
 
@@ -19,7 +19,7 @@
 - [ ] 定义 png->ab 最小兼容目标
   - [ ] MaiConv 自产 AB 可被 MaiConv 反向读取
   - [ ] 常见 AB 查看器可读（作为加分项，不作为首发阻塞）
-- [ ] 定义 Utage 1P/2P 判定规则
+- [ ] 定义 Utage L/R 判定规则
   - [ ] 明确可用的判定线索（如文件名、inote等）
   - [ ] 仅部分宴谱有多P，需要详细的判定规则以覆盖现有样本
   - [ ] 无法判定时的兜底行为（如默认为没有多P 并 warning）
@@ -124,36 +124,34 @@
 - [ ] maiconv assets --types mp3->acb+awb,mp4->dat,png->ab 输出完整
 - [ ] 单项失败可定位且不吞掉上下文
 
-## Milestone E: Utage 1P/2P 分离与命名
+## Milestone E: Utage L/R 分离与命名
 
-目标：分离 1P/2P 输出，避免继续混在 difficulty=7 同路径下不可辨识。
+目标：分离 L/R 输出，避免继续混在 difficulty=7 同路径下不可辨识。
 
 ### E1. 判定与模型
 
-- [ ] 在 chart 发现阶段加入 1P/2P 判定
-- [ ] 在 TrackInfo/映射结构增加 player-side 字段
-- [ ] 无法判定时按无多P并 warning
+- [x] 在 chart 发现阶段加入 L/R 判定
+- [x] 在导出任务映射结构增加 player-side（L/R）字段
 
 ### E2. 输出命名与元数据
 
-- [ ] 输出目录名追加 (1P)/(2P)
-- [ ] maidata title 元数据追加 (1P)/(2P)
-- [ ] 确保排序稳定，避免覆盖写入
+- [x] 输出目录名追加 (L)/(R)
+- [x] maidata title 元数据追加 (L)/(R)
+- [x] 确保排序稳定，避免覆盖写入
 
 ### E3. 筛选兼容
 
-- [ ] 更新筛选相关逻辑，确保 1P/2P 不互相覆盖
-- [ ] 文档说明筛选行为变化
+- [x] 更新筛选相关逻辑，确保 L/R 不互相覆盖
+- [x] 文档说明筛选行为变化
 
 ### E4. 测试
 
-- [ ] 扩展 tests/unit/test_assets.cpp
-  - [ ] 1P/2P 命名断言
-  - [ ] title 元数据断言
-  - [ ] 筛选行为断言
+- [x] 扩展 tests/unit/test_assets.cpp
+  - [x] L/R 命名断言
+  - [x] title 元数据断言
 
 验收标准：
-- [ ] Utage 导出结果可稳定区分 1P/2P 或明确没有多P
+- [x] Utage 导出结果可稳定区分 L/R
 
 ## Milestone F: 文档、CI、发布准备
 
@@ -162,7 +160,7 @@
 - [ ] README.md
   - [ ] TODO 状态更新
   - [ ] assets 反向导出示例
-  - [ ] Utage 1P/2P 命名说明
+  - [ ] Utage L/R 命名说明
   - [ ] LZ4 本地化说明（如需）
 - [ ] README_CN.md 同步更新
 
@@ -186,13 +184,13 @@
 
 ### P0
 
-- [ ] B: LZ4 本地替换（解码+编码）
+- [x] B: LZ4 本地替换（解码+编码）
 - [ ] C: 真正 png->ab
 
 ### P1
 
 - [ ] D: assets 反向导出三项接入
-- [ ] E: Utage 1P/2P 分离
+- [x] E: Utage L/R 分离
 
 ### P2
 
@@ -202,10 +200,8 @@
 
 - [ ] 风险：png->ab 容器写入兼容性不足
   - [ ] 缓解：先保证 MaiConv 自产可回读，再扩展外部兼容
-- [ ] 风险：LZ4 替换导致历史边界行为变化
-  - [ ] 缓解：保留并增强错误注入测试
-- [ ] 风险：Utage 判定来源不稳定
-  - [ ] 缓解：优先显式规则，兜底 warning，并补充测试样本
+- [x] 风险：LZ4 替换导致历史边界行为变化
+  - [x] 缓解：保留并增强错误注入测试
 
 ## Rollback Plan
 

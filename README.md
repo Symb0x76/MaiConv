@@ -8,7 +8,7 @@ Cross-platform C++ reimplementation and enhancement of [MaichartConverter](https
 
 - [ ] Implement local lz4 decompression in replacement of Unity LZ4 library (currently used via UABE code paths and is not performance-critical)
 - [ ] Add reverse asset export in `assets` workflow (currently available in `maiconv media`: `png->ab`, `mp3->acb+awb`, `mp4->dat`)
-- [ ] Separate 1P/2P charts for Utage (currently still coexisting as `difficulty=7` alongside regular charts)
+- [x] Separate 1P/2P Utage charts and append `(L)/(R)` to output folder names and `maidata` `&title=`
 ## Features
 
 - C++20 + CMake + git submodule (runtime deps in third_party)
@@ -153,6 +153,8 @@ Selection rules:
 - when both are provided: export only matched difficulties for matched ids
 - `--id` and `--difficulty` accept comma-separated filters, and each filter can be an exact number or a regex
 - `--difficulty` uses exported `maidata` numbering: standard charts are usually `2..6`, utage is `7`
+- for Utage tracks, when both `*_L.ma2` and `*_R.ma2` exist in the same chart folder, MaiConv exports two outputs and appends `(L)` / `(R)` to both folder name and `maidata` `&title=`
+- `--difficulty 7` matches both `(L)` and `(R)` outputs for split Utage charts
 - `--resume` (`--skip-existing`) skips tracks that already have complete exports, while keeping `_Incomplete` tracks eligible for retry
 - `--types` accepts comma-separated values:
   `maidata.txt`/`track.mp3`/`bg.png`/`pv.mp4`
@@ -250,6 +252,7 @@ For assets export, each song folder always contains `maidata.txt`, and media tar
 ```
 
 `track.mp3`/`bg.png`/`pv.mp4` may be missing when source media is unavailable (unless `--dummy` is used).
+For split Utage tracks, output folder names become `{id_title} (L)` and `{id_title} (R)`, and both `maidata` titles carry the same suffix.
 
 When source media is in original game formats, `assets` converts them as follows:
 - `acb + awb -> track.mp3` (always transcoded by external `ffmpeg`)
