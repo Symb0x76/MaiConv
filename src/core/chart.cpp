@@ -36,8 +36,37 @@ namespace maiconv {
       [this](const MeasureChange& a, const MeasureChange& b) {
         return a.tick_stamp(definition_) < b.tick_stamp(definition_);
       });
-    std::stable_sort(notes_.begin(), notes_.end(), [this](const Note& a, const Note& b) {
-      return a.tick_stamp(definition_) < b.tick_stamp(definition_);
+    const bool from_simai_source = source_bar_count_ > 0;
+    std::stable_sort(notes_.begin(), notes_.end(), [this, from_simai_source](const Note& a, const Note& b) {
+      const int ta = a.tick_stamp(definition_);
+      const int tb = b.tick_stamp(definition_);
+      if (ta != tb) {
+        return ta < tb;
+      }
+
+      const bool a_slide_start = a.type == NoteType::SlideStart;
+      const bool b_slide_start = b.type == NoteType::SlideStart;
+      const bool a_slide = is_slide_type(a.type);
+      const bool b_slide = is_slide_type(b.type);
+
+      // Simai parsing path in MaichartConverter puts start anchors before slide
+      // bodies on identical stamps.
+      if (from_simai_source && a_slide_start && b_slide && !b_slide_start) {
+        return true;
+      }
+      if (from_simai_source && b_slide_start && a_slide && !a_slide_start) {
+        return false;
+      }
+
+      // MA2 parsing path only requires same-key start/body pairing.
+      if (a_slide_start && b_slide && !b_slide_start && a.key == b.key) {
+        return true;
+      }
+      if (b_slide_start && a_slide && !a_slide_start && a.key == b.key) {
+        return false;
+      }
+
+      return false;
       });
 
     if (bpm_changes_.front().tick_stamp(definition_) != 0) {

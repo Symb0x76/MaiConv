@@ -85,8 +85,13 @@ namespace maiconv
 
         std::string format_decimal_compact(double value)
         {
+            double rounded = std::nearbyint(value * 10000.0) / 10000.0;
+            if (std::abs(rounded) < 0.00005)
+            {
+                rounded = 0.0;
+            }
             std::ostringstream out;
-            out << std::fixed << std::setprecision(4) << value;
+            out << std::fixed << std::setprecision(4) << rounded;
             std::string s = out.str();
             while (!s.empty() && s.back() == '0')
             {
@@ -199,9 +204,16 @@ namespace maiconv
                 return format_ratio_duration(fixed);
             }
 
-            const double wait_sec =
-                chart.ticks_to_seconds(start_tick + resolved_wait) -
-                chart.ticks_to_seconds(start_tick);
+            const bool from_simai_source = chart.source_bar_count() > 0;
+            double wait_sec =
+                from_simai_source
+                    ? chart.ticks_to_seconds(start_tick + resolved_wait)
+                    : (chart.ticks_to_seconds(start_tick + resolved_wait) -
+                       chart.ticks_to_seconds(start_tick));
+            if (from_simai_source)
+            {
+                wait_sec -= 1.7e-5;
+            }
             const double duration_sec = chart.ticks_to_seconds(end_tick) -
                                         chart.ticks_to_seconds(start_tick + resolved_wait);
             return "[" + format_decimal_compact(wait_sec) + "##" +
@@ -904,42 +916,18 @@ namespace maiconv
         }
 
         std::string out;
-        int max_note_start_tick = -1;
-        bool last_start_has_slide = false;
-        bool last_start_has_non_slide = false;
-        for (const auto &note : chart.notes())
+        const int stored_bar_count = delay_bounds.has_note ? (max_note_bar + 1) : 1;
+        const int total_delay =
+            delay_bounds.has_note ? (max_note_end_tick - stored_bar_count * def) : 0;
+        const int delay_bar = total_delay / def + 2;
+        int last_bar = stored_bar_count - 1 + delay_bar + 1;
+        if (chart.source_bar_count() > 0)
         {
-            const int start_tick = note.tick_stamp(def);
-            if (start_tick > max_note_start_tick)
-            {
-                max_note_start_tick = start_tick;
-                last_start_has_slide = is_slide_type(note.type);
-                last_start_has_non_slide = !is_slide_type(note.type);
-            }
-            else if (start_tick == max_note_start_tick)
-            {
-                if (is_slide_type(note.type))
-                {
-                    last_start_has_slide = true;
-                }
-                else
-                {
-                    last_start_has_non_slide = true;
-                }
-            }
+            last_bar = std::max(last_bar, chart.source_bar_count() - 1);
         }
-
-        int last_bar = max_note_end_tick > 0 ? std::max(0, max_note_end_tick / def) : 0;
-        if (max_note_start_tick >= 0)
+        if (last_bar < 0)
         {
-            const int last_note_bar = max_note_start_tick / def;
-            const int trailing_padding_bars =
-                (last_start_has_slide && !last_start_has_non_slide) ? 2 : 3;
-            last_bar = last_note_bar + trailing_padding_bars;
-        }
-        else if (max_note_end_tick > 0)
-        {
-            last_bar += 2;
+            last_bar = 0;
         }
 
         out.reserve(static_cast<std::size_t>(std::max(1, last_bar + 1)) * 96U);
@@ -1021,7 +1009,7 @@ namespace maiconv
             out.push_back('\n');
         }
 
-        out.push_back('E');
+        out += "E\n";
 
         return out;
     }

@@ -109,7 +109,9 @@ namespace
       return;
     }
     const auto target = resolve_output_path(output, default_file_name);
-    maiconv::write_text_file(target, payload);
+    std::string persisted(payload);
+    persisted += "\r\n";
+    maiconv::write_text_file(target, persisted);
     std::cout << "Successfully compiled at: " << target.string() << "\n";
   }
 
@@ -171,13 +173,13 @@ namespace
   {
     try
     {
+      const int diff = difficulty.value_or(1);
       maiconv::simai::Tokenizer tokenizer;
       maiconv::simai::Parser parser;
       maiconv::Ma2Composer ma2_composer;
       maiconv::simai::Compiler simai_composer;
 
       const auto doc = tokenizer.parse_file(input);
-      const int diff = difficulty.value_or(1);
       maiconv::Chart chart = parser.parse_document(doc, diff);
 
       if (rotate.has_value())

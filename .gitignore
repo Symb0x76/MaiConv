@@ -11,5 +11,13 @@ StreamingAssets/
 # External repositories
 external/
 
-# Executables
-*.exe
+# data files
+*.ma2
+*.txt
+*.csv
+
+# Local scripts
+*.ps1
+
+# Logs
+*.log

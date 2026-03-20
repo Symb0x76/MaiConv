@@ -70,6 +70,9 @@ class Chart {
   std::vector<MeasureChange>& measure_changes() { return measure_changes_; }
   const std::vector<MeasureChange>& measure_changes() const { return measure_changes_; }
 
+  int source_bar_count() const { return source_bar_count_; }
+  void set_source_bar_count(int count) { source_bar_count_ = count < 0 ? 0 : count; }
+
   void normalize();
 
   [[nodiscard]] double bpm_at_tick(int tick_stamp) const;
@@ -85,6 +88,7 @@ class Chart {
   std::vector<Note> notes_;
   std::vector<BpmChange> bpm_changes_;
   std::vector<MeasureChange> measure_changes_;
+  int source_bar_count_ = 0;
 
   static int rotate_key(int key, FlipMethod method);
 };

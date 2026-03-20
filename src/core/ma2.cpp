@@ -49,6 +49,24 @@ bool looks_int_token(const std::string& value) {
   return true;
 }
 
+int round_to_even_int(double value) {
+  if (!std::isfinite(value)) {
+    return 0;
+  }
+  const double floor_value = std::floor(value);
+  const double fraction = value - floor_value;
+  const int floor_int = static_cast<int>(floor_value);
+  constexpr double kMidpoint = 0.5;
+  constexpr double kEpsilon = 1e-12;
+  if (fraction < kMidpoint - kEpsilon) {
+    return floor_int;
+  }
+  if (fraction > kMidpoint + kEpsilon) {
+    return floor_int + 1;
+  }
+  return (floor_int % 2 == 0) ? floor_int : (floor_int + 1);
+}
+
 struct ParsedType {
   std::string base;
   SpecialState state = SpecialState::Normal;
@@ -259,12 +277,12 @@ Ma2Stats compute_ma2_stats(const Chart& chart) {
   std::map<int, int> each_pairs_by_stamp;
 
   for (const auto& note : chart.notes()) {
-    if (!note.is_note()) {
-      continue;
-    }
-
     if (note.state != SpecialState::ConnectingSlide) {
       ++stats.all_note_rec;
+    }
+
+    if (!note.is_note()) {
+      continue;
     }
 
     if (is_tap_genre_type(note.type) || is_hold_genre_type(note.type)) {
@@ -366,15 +384,14 @@ std::string compose_ma2_statistics(const Chart& chart, ChartFormat format) {
   const int hold_score = hold_num * 1000;
   const int slide_score = slide_num * 1500;
   const int all_score = tap_score + break_score + hold_score + slide_score;
-  const int score_s = static_cast<int>(std::llround(all_score * 0.97));
-  const int score_ss = static_cast<int>(std::llround(all_score * 0.99));
-  const int rated_achievement =
-      all_score == 0
-          ? 10000
-          : static_cast<int>(
-                std::llround((1.0 + (static_cast<double>(break_num) * 100.0) /
-                                      static_cast<double>(all_score)) *
-                             10000.0));
+  const int score_s = round_to_even_int(all_score * 0.97);
+  const int score_ss = round_to_even_int(all_score * 0.99);
+  const int rated_achievement = all_score == 0
+                                    ? 0
+                                    : round_to_even_int(
+                                          (1.0 + (static_cast<double>(break_num) * 100.0) /
+                                                     static_cast<double>(all_score)) *
+                                          10000.0);
 
   std::ostringstream out;
   out << "T_REC_TAP\t" << stats.normal_tap << "\n";
@@ -604,25 +621,23 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
     out << "BPM\t" << bpm.bar << "\t" << bpm.tick << "\t" << bpm.bpm << "\n";
   }
 
-  bool has_prev_measure = false;
-  MeasureChange prev_measure{};
-  for (std::size_t i = 0; i < chart.measure_changes().size(); ++i) {
-    const auto& measure = chart.measure_changes()[i];
-    const bool duplicate = has_prev_measure && measure.bar == prev_measure.bar &&
-                           measure.tick == prev_measure.tick &&
-                           measure.quaver == prev_measure.quaver &&
-                           measure.beats == prev_measure.beats;
-    if (duplicate) {
-      continue;
+  const auto& measures = chart.measure_changes();
+  if (measures.size() <= 1) {
+    out << "MET\t0\t0\t" << first_measure.quaver << "\t" << first_measure.beats << "\n";
+  } else {
+    for (std::size_t i = 1; i < measures.size(); ++i) {
+      const auto& target = measures[i];
+      const auto& source = (i == 1) ? first_measure : measures[i - 1];
+      out << "MET\t" << target.bar << "\t" << target.tick << "\t" << source.quaver << "\t" << source.beats << "\n";
     }
-    out << "MET\t" << measure.bar << "\t" << measure.tick << "\t" << measure.quaver << "\t" << measure.beats << "\n";
-    prev_measure = measure;
-    has_prev_measure = true;
   }
 
   out << "\n";
 
   for (const auto& note : chart.notes()) {
+    if (!note.is_note()) {
+      continue;
+    }
     const std::string type = ma2_type_for_format(note, format);
     out << type << "\t" << note.bar << "\t" << note.tick << "\t" << note.key;
 
@@ -642,7 +657,6 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
 
   out << "\n";
   out << compose_ma2_statistics(chart, format);
-  out << "\n";
 
   return out.str();
 }

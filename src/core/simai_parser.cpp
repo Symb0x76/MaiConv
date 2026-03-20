@@ -54,6 +54,67 @@ namespace maiconv
             return std::nullopt;
         }
 
+        bool is_slide_notation_char(char token)
+        {
+            return token == '-' || token == 'v' || token == 'w' || token == '<' ||
+                   token == '>' || token == 'p' || token == 'q' || token == 's' ||
+                   token == 'z' || token == 'V' || token == '^';
+        }
+
+        std::vector<std::string> extract_slide_start(const std::string &token)
+        {
+            std::vector<std::string> result;
+            if (token.empty())
+            {
+                return result;
+            }
+
+            bool slide_notation_found = is_slide_notation_char(token.front());
+            std::string buffer;
+            for (char symbol : token)
+            {
+                if (!slide_notation_found && is_slide_notation_char(symbol))
+                {
+                    buffer.push_back('_');
+                    result.push_back(buffer);
+                    buffer.clear();
+                    buffer.push_back(symbol);
+                    slide_notation_found = true;
+                }
+                else
+                {
+                    buffer.push_back(symbol);
+                }
+            }
+
+            result.push_back(buffer);
+            return result;
+        }
+
+        std::vector<std::string> extract_each_slides(const std::string &token)
+        {
+            std::vector<std::string> result;
+            if (token.empty())
+            {
+                return result;
+            }
+
+            if (token.find('*') == std::string::npos)
+            {
+                const auto extracted = extract_slide_start(token);
+                result.insert(result.end(), extracted.begin(), extracted.end());
+                return result;
+            }
+
+            const auto candidates = split(token, '*');
+            for (const auto &candidate : candidates)
+            {
+                const auto extracted = extract_slide_start(candidate);
+                result.insert(result.end(), extracted.begin(), extracted.end());
+            }
+            return result;
+        }
+
         SpecialState parse_state(const std::string &token)
         {
             const bool has_break = token.find('b') != std::string::npos;
@@ -112,7 +173,7 @@ namespace maiconv
 
             const auto to_ticks = [&](double sec, int at_tick)
             {
-                return std::max(1, chart.seconds_to_ticks_at(sec, at_tick));
+                return std::max(0, chart.seconds_to_ticks_at(sec, at_tick));
             };
 
             if (body.find("##") != std::string::npos)
@@ -150,7 +211,7 @@ namespace maiconv
                 const double quaver = to_double(qb[0], 4.0);
                 const double beat = qb.size() > 1 ? to_double(qb[1], 1.0) : 1.0;
                 const int base_ticks =
-                    std::max(1, static_cast<int>(std::llround(384.0 / quaver * beat)));
+                    std::max(0, static_cast<int>(std::llround(384.0 / quaver * beat)));
                 if (is_slide)
                 {
                     out.wait = 96;
@@ -225,8 +286,18 @@ namespace maiconv
             case 'w':
                 return NoteType::SlideWifi;
             case '<':
+                if (start_key == 0 || start_key == 1 || start_key == 6 ||
+                    start_key == 7)
+                {
+                    return NoteType::SlideCurveLeft;
+                }
                 return NoteType::SlideCurveRight;
             case '>':
+                if (start_key == 0 || start_key == 1 || start_key == 6 ||
+                    start_key == 7)
+                {
+                    return NoteType::SlideCurveRight;
+                }
                 return NoteType::SlideCurveLeft;
             case 'q':
                 return NoteType::SlideP;
@@ -288,17 +359,8 @@ namespace maiconv
 
     bool simai::Parser::contains_slide_notation(const std::string &token)
     {
-        return token.find('-') != std::string::npos ||
-               token.find('v') != std::string::npos ||
-               token.find('w') != std::string::npos ||
-               token.find('<') != std::string::npos ||
-               token.find('>') != std::string::npos ||
-               token.find('p') != std::string::npos ||
-               token.find('q') != std::string::npos ||
-               token.find('s') != std::string::npos ||
-               token.find('z') != std::string::npos ||
-               token.find('V') != std::string::npos ||
-               token.find('^') != std::string::npos;
+        return std::any_of(token.begin(), token.end(), [](char ch)
+                           { return is_slide_notation_char(ch); });
     }
 
     std::vector<std::string> simai::Parser::each_group_of_token(
@@ -348,7 +410,12 @@ namespace maiconv
         std::vector<std::string> out;
         for (const auto &part : extracted)
         {
-            if (is_digit_token(part) && part.size() > 1)
+            if (contains_slide_notation(part))
+            {
+                const auto expanded = extract_each_slides(part);
+                out.insert(out.end(), expanded.begin(), expanded.end());
+            }
+            else if (is_digit_token(part) && part.size() > 1)
             {
                 for (char c : part)
                 {
@@ -382,80 +449,12 @@ namespace maiconv
     Chart simai::Parser::parse_tokens(const std::vector<std::string> &tokens) const
     {
         Chart chart;
-        chart.bpm_changes().push_back(BpmChange{0, 0, 120.0});
-        chart.measure_changes().push_back(MeasureChange{0, 0, 4, 4});
-
-        std::vector<BpmChange> planned_bpm;
-        planned_bpm.push_back(BpmChange{0, 0, 120.0});
-        {
-            int scan_bar = 0;
-            int scan_tick = 0;
-            int scan_step = 96;
-            for (const auto &raw : tokens)
-            {
-                const auto groups = each_group_of_token(raw);
-                for (auto group : groups)
-                {
-                    bool grace = false;
-                    if (group.find('%') != std::string::npos)
-                    {
-                        grace = true;
-                        group.erase(std::remove(group.begin(), group.end(), '%'), group.end());
-                    }
-                    if (!group.empty() && group.front() == '(' && group.back() == ')')
-                    {
-                        const double bpm = to_double(group.substr(1, group.size() - 2), 120.0);
-                        planned_bpm.push_back(BpmChange{scan_bar, scan_tick, bpm});
-                    }
-                    else if (!group.empty() && group.front() == '{' && group.back() == '}')
-                    {
-                        const int quaver = std::max(1, to_int(group.substr(1, group.size() - 2), 4));
-                        scan_step = std::max(1, chart.definition() / quaver);
-                    }
-
-                    if (grace)
-                    {
-                        ++scan_tick;
-                        while (scan_tick >= chart.definition())
-                        {
-                            scan_tick -= chart.definition();
-                            ++scan_bar;
-                        }
-                    }
-                }
-
-                scan_tick += scan_step;
-                while (scan_tick >= chart.definition())
-                {
-                    scan_tick -= chart.definition();
-                    ++scan_bar;
-                }
-            }
-            std::sort(planned_bpm.begin(), planned_bpm.end(),
-                      [&](const BpmChange &a, const BpmChange &b)
-                      {
-                          return a.tick_stamp(chart.definition()) <
-                                 b.tick_stamp(chart.definition());
-                      });
-        }
-
-        const auto planned_bpm_at = [&](int tick_stamp)
-        {
-            double bpm = planned_bpm.front().bpm;
-            for (const auto &change : planned_bpm)
-            {
-                if (change.tick_stamp(chart.definition()) > tick_stamp)
-                {
-                    break;
-                }
-                bpm = change.bpm;
-            }
-            return bpm;
-        };
-
         int bar = 0;
         int tick = 0;
-        int tick_step = 96;
+        int tick_step = 0;
+        int source_bar_count = 0;
+        bool saw_end_marker = false;
+        double current_bpm = 0.0;
         int previous_slide_start_key = 0;
 
         const auto add_tap = [&](const std::string &token, int at_bar, int at_tick,
@@ -495,7 +494,7 @@ namespace maiconv
             note.state = state;
             note.bar = at_bar;
             note.tick = at_tick;
-            note.bpm = chart.bpm_at_tick(note.tick_stamp(chart.definition()));
+            note.bpm = current_bpm;
             if (commit)
             {
                 chart.notes().push_back(note);
@@ -532,9 +531,8 @@ namespace maiconv
 
                 if (group.front() == '(' && group.back() == ')')
                 {
-                    const double bpm =
-                        to_double(group.substr(1, group.size() - 2),
-                                  chart.bpm_at_tick(bar * chart.definition() + tick));
+                    const double bpm = to_double(group.substr(1, group.size() - 2), current_bpm);
+                    current_bpm = bpm;
                     chart.bpm_changes().push_back(BpmChange{bar, tick, bpm});
                 }
                 else if (group.front() == '{' && group.back() == '}')
@@ -542,11 +540,11 @@ namespace maiconv
                     const int quaver =
                         std::max(1, to_int(group.substr(1, group.size() - 2), 4));
                     tick_step = std::max(1, chart.definition() / quaver);
-                    chart.measure_changes().push_back(MeasureChange{bar, tick, quaver, 4});
                 }
                 else if (contains_slide_notation(group))
                 {
                     std::vector<std::string> segments = split(group, '*');
+                    const bool is_each_slide_set = group.find('*') != std::string::npos;
                     std::string shared_duration;
                     int duration_count = 0;
                     for (const auto &seg : segments)
@@ -564,6 +562,9 @@ namespace maiconv
 
                     int local_offset = 0;
                     int current_start_key = previous_slide_start_key;
+                    const bool suppress_slide_start_placeholder =
+                        group.find('!') != std::string::npos ||
+                        group.find('?') != std::string::npos;
 
                     for (std::size_t i = 0; i < segments.size(); ++i)
                     {
@@ -576,39 +577,44 @@ namespace maiconv
                         }
                         segment = stripped;
 
-                        const auto start_key_opt = first_key_from_token(segment);
-                        std::size_t cursor = 0;
-                        if (start_key_opt.has_value())
-                        {
-                            current_start_key = *start_key_opt;
-                            const auto pos = segment.find_first_of("12345678");
-                            if (pos != std::string::npos)
-                            {
-                                cursor = pos + 1;
-                            }
-                        }
-
-                        int end_key = current_start_key;
-                        while (cursor < segment.size() &&
-                               !std::isdigit(static_cast<unsigned char>(segment[cursor])) &&
-                               segment[cursor] != '-' && segment[cursor] != 'v' &&
-                               segment[cursor] != 'w' && segment[cursor] != '<' &&
-                               segment[cursor] != '>' && segment[cursor] != 'p' &&
-                               segment[cursor] != 'q' && segment[cursor] != 's' &&
-                               segment[cursor] != 'z' && segment[cursor] != '^' &&
-                               segment[cursor] != 'V')
-                        {
-                            ++cursor;
-                        }
-
-                        std::size_t consumed = 1;
-                        int inflection = -1;
-                        if (cursor >= segment.size())
+                        const std::size_t notation_pos = segment.find_first_of("-vw<>pqsz^V");
+                        if (notation_pos == std::string::npos)
                         {
                             continue;
                         }
 
-                        std::size_t key_pos = cursor;
+                        std::optional<int> explicit_start_key;
+                        for (std::size_t pos = 0; pos < notation_pos; ++pos)
+                        {
+                            const char ch = segment[pos];
+                            if (ch >= '1' && ch <= '8')
+                            {
+                                explicit_start_key = static_cast<int>(ch - '1');
+                                break;
+                            }
+                        }
+
+                        if (explicit_start_key.has_value())
+                        {
+                            current_start_key = *explicit_start_key;
+                            if (!suppress_slide_start_placeholder &&
+                                (i == 0 || is_each_slide_set))
+                            {
+                                Note slide_start;
+                                slide_start.type = NoteType::SlideStart;
+                                slide_start.state = parse_state(segment);
+                                slide_start.bar = bar;
+                                slide_start.tick = tick;
+                                slide_start.key = *explicit_start_key;
+                                slide_start.bpm = current_bpm;
+                                chart.notes().push_back(slide_start);
+                            }
+                        }
+
+                        int end_key = current_start_key;
+                        std::size_t consumed = 1;
+                        int inflection = -1;
+                        std::size_t key_pos = notation_pos;
                         const NoteType type =
                             parse_slide_type(segment, key_pos, current_start_key,
                                              current_start_key, consumed, inflection);
@@ -623,38 +629,41 @@ namespace maiconv
                             end_key = static_cast<int>(segment[key_pos] - '1');
                         }
 
-                        const int absolute_tick = bar * chart.definition() + tick + local_offset;
+                        const int absolute_tick =
+                            bar * chart.definition() + tick +
+                            (is_each_slide_set ? 0 : local_offset);
                         const auto [note_bar, note_tick] =
                             to_bar_tick(absolute_tick, chart.definition());
 
-                        const double start_bpm = planned_bpm_at(absolute_tick);
-                        const double action_bpm = planned_bpm_at(absolute_tick + 96);
                         DurationTicks dur =
                             parse_duration(duration.empty() ? "[16:1]" : duration, chart,
-                                           absolute_tick, true, start_bpm, action_bpm);
-                        if (i > 0)
+                                           absolute_tick, true);
+                        if (!is_each_slide_set && i > 0)
                         {
                             dur.wait = 0;
                         }
 
                         Note note;
                         note.type = type;
-                        note.state =
-                            (i > 0) ? SpecialState::ConnectingSlide : parse_state(segment);
+                        note.state = (!is_each_slide_set && i > 0)
+                                         ? SpecialState::ConnectingSlide
+                                         : parse_state(segment);
                         note.bar = note_bar;
                         note.tick = note_tick;
                         note.key = current_start_key;
                         note.end_key = end_key;
                         note.wait_ticks = std::max(0, dur.wait);
-                        note.last_ticks = std::max(1, dur.last);
-                        note.bpm = chart.bpm_at_tick(absolute_tick);
+                        note.last_ticks = std::max(0, dur.last);
+                        note.bpm = current_bpm;
                         chart.notes().push_back(note);
 
-                        local_offset += note.wait_ticks + note.last_ticks;
-                        current_start_key = end_key;
+                        if (!is_each_slide_set)
+                        {
+                            local_offset += note.wait_ticks + note.last_ticks;
+                            current_start_key = end_key;
+                        }
                     }
 
-                    previous_slide_start_key = current_start_key;
                 }
                 else if (group.find('h') != std::string::npos)
                 {
@@ -691,11 +700,11 @@ namespace maiconv
                     }
 
                     const DurationTicks dur =
-                        parse_duration(duration_token.empty() ? "[4:1]" : duration_token,
+                        parse_duration(duration_token.empty() ? "[384:0]" : duration_token,
                                        chart, note.tick_stamp(chart.definition()), false);
                     note.wait_ticks = 0;
-                    note.last_ticks = std::max(1, dur.last);
-                    note.bpm = chart.bpm_at_tick(note.tick_stamp(chart.definition()));
+                    note.last_ticks = std::max(0, dur.last);
+                    note.bpm = current_bpm;
                     chart.notes().push_back(note);
                 }
                 else if (group.find('!') != std::string::npos ||
@@ -706,6 +715,12 @@ namespace maiconv
                     {
                         previous_slide_start_key = maybe->key;
                     }
+                    Note placeholder;
+                    placeholder.type = NoteType::Rest;
+                    placeholder.bar = bar;
+                    placeholder.tick = tick;
+                    placeholder.bpm = current_bpm;
+                    chart.notes().push_back(placeholder);
                 }
                 else if (!group.empty() && group != "E")
                 {
@@ -715,6 +730,19 @@ namespace maiconv
                     {
                         previous_slide_start_key = maybe->key;
                     }
+                }
+                else if (group == "E")
+                {
+                    saw_end_marker = true;
+                    // MaichartConverter keeps three additional empty bars after the
+                    // bar where end marker is read in text-to-text conversions.
+                    source_bar_count = std::max(source_bar_count, bar + 3);
+                    Note placeholder;
+                    placeholder.type = NoteType::Rest;
+                    placeholder.bar = bar;
+                    placeholder.tick = tick;
+                    placeholder.bpm = current_bpm;
+                    chart.notes().push_back(placeholder);
                 }
 
                 if (grace)
@@ -736,6 +764,12 @@ namespace maiconv
             }
         }
 
+        if (!saw_end_marker)
+        {
+            source_bar_count =
+                std::max(source_bar_count, bar + (tick > 0 ? 1 : 0));
+        }
+        chart.set_source_bar_count(source_bar_count);
         chart.normalize();
         return chart;
     }

@@ -25,6 +25,24 @@ TEST_CASE("simai parser basic notes")
   REQUIRE(chart.notes().size() >= 3);
 }
 
+TEST_CASE("simai parser tracks source bar count at end marker")
+{
+  simai::Tokenizer tokenizer;
+  simai::Parser parser;
+  const auto tokens = tokenizer.tokenize_text("(120){1}1,{1},{1},E");
+  Chart chart = parser.parse_tokens(tokens);
+  REQUIRE(chart.source_bar_count() == 6);
+}
+
+TEST_CASE("simai parser keeps source bar count through parse_document")
+{
+  simai::Tokenizer tokenizer;
+  simai::Parser parser;
+  const auto doc = tokenizer.parse_document("&inote_2=(120){1}1,{1},{1},E");
+  Chart chart = parser.parse_document(doc, 2);
+  REQUIRE(chart.source_bar_count() == 6);
+}
+
 TEST_CASE("simai separated tokenizer/parser/compiler is deterministic")
 {
   const std::string source =
@@ -60,19 +78,24 @@ TEST_CASE("simai separated parser utility methods behave as expected")
   REQUIRE(simai::Parser::contains_slide_notation(token));
   const auto groups = simai::Parser::each_group_of_token(token);
   REQUIRE_FALSE(groups.empty());
-  REQUIRE(std::find(groups.begin(), groups.end(), "2-3[8:1]*") != groups.end());
+  REQUIRE(std::find(groups.begin(), groups.end(), "2_") != groups.end());
+  REQUIRE(std::find(groups.begin(), groups.end(), "-3[8:1]") != groups.end());
 }
 
-TEST_CASE("simai cross-bpm slide duration uses action bpm")
+TEST_CASE("simai parser keeps ratio slide duration ticks when bpm changes later")
 {
   simai::Tokenizer tokenizer;
   simai::Parser parser;
   const auto tokens = tokenizer.tokenize_text("(199)1-2[16:1],(12.4375),,");
   Chart chart = parser.parse_tokens(tokens);
   REQUIRE_FALSE(chart.notes().empty());
-  const auto slide = chart.notes().front();
+  const auto slide_it =
+      std::find_if(chart.notes().begin(), chart.notes().end(),
+                   [](const Note &n) { return is_slide_type(n.type); });
+  REQUIRE(slide_it != chart.notes().end());
+  const auto &slide = *slide_it;
   REQUIRE(is_slide_type(slide.type));
-  REQUIRE(slide.last_ticks <= 2);
+  REQUIRE(slide.last_ticks == 24);
 }
 
 TEST_CASE("simai compose can be parsed back")
@@ -104,7 +127,7 @@ TEST_CASE(
   REQUIRE(simai.find("{1}1x,\n") != std::string::npos);
   REQUIRE(simai.find("{1}1-5[4:3],\n") != std::string::npos);
   REQUIRE(simai.find("##") == std::string::npos);
-  REQUIRE(simai.ends_with("E"));
+  REQUIRE(simai.ends_with("E\n"));
 }
 
 TEST_CASE("simai tokenizer preserves ampersands in line-based metadata")
@@ -442,7 +465,7 @@ TEST_CASE(
   simai::Compiler composer;
   const std::string simai = composer.compile_chart(chart);
 
-  REQUIRE(simai.ends_with("{1}1,\n{1},\n{1},\n{1},\nE"));
+  REQUIRE(simai.ends_with("{1}1,\n{1},\n{1},\nE\n"));
 }
 
 TEST_CASE("simai compose keeps two trailing empty bars after slide endings")
@@ -459,9 +482,14 @@ TEST_CASE("simai compose keeps two trailing empty bars after slide endings")
   slide.wait_ticks = 96;
   slide.last_ticks = 48;
   chart.notes().push_back(slide);
+  Note start;
+  start.type = NoteType::SlideStart;
+  start.bar = 0;
+  start.key = 0;
+  chart.notes().push_back(start);
 
   simai::Compiler composer;
   const std::string simai = composer.compile_chart(chart);
 
-  REQUIRE(simai.ends_with("{1}1-5[8:1],\n{1},\n{1},\nE"));
+  REQUIRE(simai.ends_with("{1}1-5[8:1],\n{1},\n{1},\nE\n"));
 }
