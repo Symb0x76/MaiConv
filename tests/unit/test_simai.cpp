@@ -227,13 +227,13 @@ TEST_CASE("simai compose uses real export slide notation mapping")
   simai::Compiler composer;
   const std::string simai = composer.compile_chart(chart);
 
-  REQUIRE(simai.find("{1}3p6[8:5],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}7q4[8:5],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}2pp5[8:5],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}7qq4[8:5],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}6>1[8:5],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}3<7[8:5],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}2V46[8:5],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}3?p6[8:5],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}7?q4[8:5],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}2?pp5[8:5],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}7?qq4[8:5],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}6?>1[8:5],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}3?<7[8:5],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}2?V46[8:5],\n") != std::string::npos);
 }
 
 TEST_CASE(
@@ -271,7 +271,7 @@ TEST_CASE(
   simai::Compiler composer;
   const std::string simai = composer.compile_chart(chart);
 
-  REQUIRE(simai.find("2x-7[8:1]*-2[8:1]") != std::string::npos);
+  REQUIRE(simai.find("2x-7-2[4:1]") != std::string::npos);
   REQUIRE(simai.find("2x_/") == std::string::npos);
 }
 
@@ -349,7 +349,7 @@ TEST_CASE(
   simai::Compiler composer;
   const std::string simai = composer.compile_chart(chart);
 
-  REQUIRE(simai.find("1-4[8:1]*-6[8:1]") != std::string::npos);
+  REQUIRE(simai.find("1?-4-6[4:1]") != std::string::npos);
 }
 
 TEST_CASE("simai compose inherits special slide starts without emitting "
@@ -413,7 +413,7 @@ TEST_CASE("simai compose orders touch and regular notes before slides in "
   simai::Compiler composer;
   const std::string simai = composer.compile_chart(chart);
 
-  REQUIRE(simai.find("{1}E5/8/7-3[8:1],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}E5/8/7?-3[8:1],\n") != std::string::npos);
 }
 
 TEST_CASE("simai compose does not repeat break suffix on slide end key")
@@ -445,8 +445,8 @@ TEST_CASE("simai compose does not repeat break suffix on slide end key")
   simai::Compiler composer;
   const std::string simai = composer.compile_chart(chart);
 
-  REQUIRE(simai.find("{1}4b-8[8:1],\n") != std::string::npos);
-  REQUIRE(simai.find("{1}8b<1[8:1],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}4?-8b[8:1],\n") != std::string::npos);
+  REQUIRE(simai.find("{1}8?<1b[8:1],\n") != std::string::npos);
 }
 
 TEST_CASE(
