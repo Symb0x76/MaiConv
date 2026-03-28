@@ -1196,18 +1196,50 @@ namespace maiconv
         detect_asset_bases(const std::vector<std::filesystem::path> &source_roots,
                            const std::string &folder_name)
         {
-            std::vector<std::filesystem::path> bases;
+            struct AssetBasePick
+            {
+                std::filesystem::path base;
+                int root_priority = -1;
+                std::string tie_break_key;
+            };
+
+            std::vector<AssetBasePick> picks;
             for (const auto &root : source_roots)
             {
                 const auto candidate = root / folder_name;
                 if (std::filesystem::exists(candidate) &&
                     std::filesystem::is_directory(candidate))
                 {
-                    bases.push_back(candidate);
+                    picks.push_back(AssetBasePick{
+                        candidate,
+                        source_root_numeric_priority(root),
+                        lower(path_to_generic_utf8(candidate.lexically_normal())),
+                    });
                 }
             }
-            std::sort(bases.begin(), bases.end());
-            bases.erase(std::unique(bases.begin(), bases.end()), bases.end());
+
+            std::sort(picks.begin(), picks.end(),
+                      [](const AssetBasePick &lhs, const AssetBasePick &rhs)
+                      {
+                          if (lhs.root_priority != rhs.root_priority)
+                          {
+                              return lhs.root_priority > rhs.root_priority;
+                          }
+                          return lhs.tie_break_key > rhs.tie_break_key;
+                      });
+
+            std::vector<std::filesystem::path> bases;
+            bases.reserve(picks.size());
+            std::string last_key;
+            for (const auto &pick : picks)
+            {
+                if (!last_key.empty() && pick.tie_break_key == last_key)
+                {
+                    continue;
+                }
+                bases.push_back(pick.base);
+                last_key = pick.tie_break_key;
+            }
             return bases;
         }
 

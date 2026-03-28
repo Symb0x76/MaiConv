@@ -483,6 +483,52 @@ TEST_CASE("assets auto-detects media folders from streaming assets roots")
   fs::remove_all(temp_root);
 }
 
+TEST_CASE("assets prefers higher-priority media roots for duplicate assets")
+{
+  const fs::path temp_root = unique_temp_dir("assets_media_root_priority");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A000", "000460", "CrossRootSong", "VARIETY",
+               "PRISM");
+
+  const fs::path old_root = assets_root / "A000";
+  const fs::path new_root = assets_root / "L101";
+  fs::create_directories(old_root / "SoundData");
+  fs::create_directories(old_root / "AssetBundleImages");
+  fs::create_directories(old_root / "MovieData");
+  fs::create_directories(new_root / "SoundData");
+  fs::create_directories(new_root / "AssetBundleImages");
+  fs::create_directories(new_root / "MovieData");
+
+  write_text_file(old_root / "SoundData" / "music000460.mp3", "old-audio");
+  write_text_file(old_root / "AssetBundleImages" / "UI_Jacket_000460.png",
+                  "old-cover");
+  write_text_file(old_root / "MovieData" / "000460.mp4", "old-video");
+
+  write_text_file(new_root / "SoundData" / "music000460.mp3", "new-audio-l101");
+  write_text_file(new_root / "AssetBundleImages" / "UI_Jacket_000460.png",
+                  "new-cover-l101");
+  write_text_file(new_root / "MovieData" / "000460.mp4",
+                  "new-video-l101-full");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+
+  REQUIRE(run_compile_assets(options) == 0);
+
+  const fs::path exported = output_root / "000460_CrossRootSong";
+  REQUIRE(fs::exists(exported / "maidata.txt"));
+  REQUIRE(read_text_file(exported / "track.mp3") == "new-audio-l101");
+  REQUIRE(read_text_file(exported / "bg.png") == "new-cover-l101");
+  REQUIRE(read_text_file(exported / "pv.mp4") == "new-video-l101-full");
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets can export selected output types only")
 {
   const fs::path temp_root = unique_temp_dir("assets_export_types_selected");
