@@ -131,6 +131,12 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --id 114514,36
 maiconv assets --input /path/to/StreamingAssets --output ./output --id '^11\\d{4}$' --difficulty '^[23]$' --layout flat
 ```
 
+按版本筛选曲目：
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./output --version '23,^buddies\\s*plus$' --layout flat
+```
+
 以显示等级导出 `maidata.txt` 中的 `lv_*`：
 
 ```bash
@@ -160,6 +166,7 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat 
 - 传 `--id` 且不传 `--difficulty`：导出命中 id 的全部难度
 - 同时传 `--id` 和 `--difficulty`：只导出命中 id 的命中难度
 - `--id` 和 `--difficulty` 支持逗号分隔多条件，每一项可为数字或正则
+- `--version` 支持逗号分隔多条件，每一项可为版本 id（数字）、版本名或正则
 - `--difficulty` 使用导出的 `maidata` 难度编号：普通谱通常是 `2..6`，宴谱是 `7`
 - 对宴谱而言，若同一谱面目录同时存在 `*_L.ma2` 与 `*_R.ma2`，MaiConv 会拆分导出两份结果，并在目录名与 `maidata` `&title=` 追加 `(L)` / `(R)`
 - 对已拆分的宴谱，`--difficulty 7` 会同时命中 `(L)` 与 `(R)` 两份输出

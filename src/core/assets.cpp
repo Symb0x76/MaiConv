@@ -649,6 +649,123 @@ namespace maiconv
             return filters;
         }
 
+        struct VersionFilterSet
+        {
+            bool provided = false;
+            std::set<std::string> exact_version_ids;
+            std::set<std::string> exact_version_names;
+            std::vector<std::regex> regex;
+            std::vector<std::string> raw_tokens;
+
+            bool active() const
+            {
+                return !exact_version_ids.empty() || !exact_version_names.empty() ||
+                       !regex.empty();
+            }
+        };
+
+        VersionFilterSet compile_version_filters(const AssetsOptions &options)
+        {
+            std::vector<std::string> filter_inputs = options.target_version_filters;
+            if (options.target_version.has_value() &&
+                !options.target_version->empty())
+            {
+                filter_inputs.push_back(*options.target_version);
+            }
+
+            VersionFilterSet filters;
+            filters.provided = !filter_inputs.empty();
+            for (const auto &token : normalize_filter_tokens(filter_inputs))
+            {
+                if (token.empty())
+                {
+                    throw std::runtime_error("version filter contains empty item");
+                }
+                filters.raw_tokens.push_back(token);
+                if (is_decimal_number(token))
+                {
+                    const int value = to_int(token, -1);
+                    if (value < 0)
+                    {
+                        throw std::runtime_error("version id must be >= 0");
+                    }
+                    filters.exact_version_ids.insert(std::to_string(value));
+                    continue;
+                }
+
+                const std::string normalized_name = normalize_version_name_key(token);
+                if (!normalized_name.empty())
+                {
+                    filters.exact_version_names.insert(normalized_name);
+                }
+
+                try
+                {
+                    filters.regex.emplace_back(token, std::regex::ECMAScript |
+                                                          std::regex::icase);
+                }
+                catch (const std::regex_error &ex)
+                {
+                    throw std::runtime_error("invalid version regex \"" + token +
+                                             "\": " + ex.what());
+                }
+            }
+            return filters;
+        }
+
+        bool matches_version_filter(const TrackInfo &info,
+                                    const VersionFilterSet &filters)
+        {
+            if (!filters.active())
+            {
+                return true;
+            }
+
+            const auto completed = complete_version_fields(info.version_id, info.version);
+            const std::string version_id =
+                trim(completed.first.empty() ? info.version_id : completed.first);
+            const std::string version_name =
+                trim(completed.second.empty() ? info.version : completed.second);
+            const std::string export_version_name =
+                trim(normalize_export_version_display(version_name));
+            const std::string normalized_version_name =
+                normalize_version_name_key(version_name);
+            const std::string normalized_export_version_name =
+                normalize_version_name_key(export_version_name);
+
+            if (!version_id.empty() &&
+                filters.exact_version_ids.find(version_id) !=
+                    filters.exact_version_ids.end())
+            {
+                return true;
+            }
+            if ((!normalized_version_name.empty() &&
+                 filters.exact_version_names.find(normalized_version_name) !=
+                     filters.exact_version_names.end()) ||
+                (!normalized_export_version_name.empty() &&
+                 filters.exact_version_names.find(normalized_export_version_name) !=
+                     filters.exact_version_names.end()))
+            {
+                return true;
+            }
+
+            const auto regex_matches = [&](const std::string &candidate)
+            {
+                if (candidate.empty())
+                {
+                    return false;
+                }
+                return std::any_of(filters.regex.begin(), filters.regex.end(),
+                                   [&](const std::regex &re)
+                                   { return std::regex_match(candidate, re); });
+            };
+
+            return regex_matches(version_id) || regex_matches(version_name) ||
+                   regex_matches(export_version_name) ||
+                   regex_matches(normalized_version_name) ||
+                   regex_matches(normalized_export_version_name);
+        }
+
         NumericFilterSet compile_difficulty_filters(const AssetsOptions &options)
         {
             std::vector<std::string> filter_inputs = options.target_difficulty_filters;
@@ -2208,6 +2325,7 @@ namespace maiconv
         {
             bool matched_music_id = false;
             bool matched_difficulty = false;
+            bool matched_version = false;
             bool emit_track_output = false;
             bool incomplete = false;
             bool skipped_existing = false;
@@ -2228,6 +2346,7 @@ namespace maiconv
                              const AssetsOptions &options,
                              const NumericFilterSet &target_music_filters,
                              const NumericFilterSet &target_difficulty_filters,
+                             const VersionFilterSet &target_version_filters,
                              const std::vector<std::filesystem::path> &music_bases,
                              const std::vector<std::filesystem::path> &cover_bases,
                              const std::vector<std::filesystem::path> &video_bases,
@@ -2292,6 +2411,15 @@ namespace maiconv
                 if (target_music_filters.active())
                 {
                     result.matched_music_id = true;
+                }
+                if (target_version_filters.active() &&
+                    !matches_version_filter(info, target_version_filters))
+                {
+                    return result;
+                }
+                if (target_version_filters.active())
+                {
+                    result.matched_version = true;
                 }
 
                 std::vector<std::filesystem::path> all_ma2_files;
@@ -3142,9 +3270,12 @@ namespace maiconv
             {
                 throw std::runtime_error("difficulty requires music id");
             }
+            VersionFilterSet target_version_filters =
+                compile_version_filters(options);
 
             bool matched_music_id = false;
             bool matched_difficulty = false;
+            bool matched_version = false;
 
             std::map<int, std::string> compiled_tracks;
             std::vector<std::string> warnings;
@@ -3386,7 +3517,8 @@ namespace maiconv
                 {
                     results[i] = process_track_folder(
                         jobs[i].folder, jobs[i].utage_side, options,
-                        target_music_filters, target_difficulty_filters, music_bases,
+                        target_music_filters, target_difficulty_filters,
+                        target_version_filters, music_bases,
                         cover_bases, video_bases, music_indexes, cover_indexes,
                         video_indexes, output_path_mutex_pool);
                     emit_track_progress_immediately(results[i]);
@@ -3420,7 +3552,8 @@ namespace maiconv
             }
             results[index] = process_track_folder(
               jobs[index].folder, jobs[index].utage_side, options,
-                target_music_filters, target_difficulty_filters, music_bases,
+                target_music_filters, target_difficulty_filters,
+                target_version_filters, music_bases,
                 cover_bases, video_bases, music_indexes, cover_indexes,
                 video_indexes, output_path_mutex_pool);
             emit_track_progress_immediately(results[index]);
@@ -3470,6 +3603,7 @@ namespace maiconv
                 timing.merge(result.timing);
                 matched_music_id = matched_music_id || result.matched_music_id;
                 matched_difficulty = matched_difficulty || result.matched_difficulty;
+                matched_version = matched_version || result.matched_version;
 
                 for (const auto &warning : result.warnings)
                 {
@@ -3529,6 +3663,11 @@ namespace maiconv
                     "Difficulty not found for filters: id=" +
                     join_tokens(target_music_filters.raw_tokens) +
                     " difficulty=" + join_tokens(target_difficulty_filters.raw_tokens));
+            }
+            if (target_version_filters.active() && !matched_version)
+            {
+                throw std::runtime_error("Version not found for filters: " +
+                                         join_tokens(target_version_filters.raw_tokens));
             }
 
             emit_log_output(compiled_tracks, warnings, options.output_path,

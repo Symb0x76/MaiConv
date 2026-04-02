@@ -123,6 +123,12 @@ Export by regex filters:
 maiconv assets --input /path/to/StreamingAssets --output ./Output --id '^11\\d{4}$' --difficulty '^[23]$' --layout flat
 ```
 
+Export tracks for specific version(s):
+
+```bash
+maiconv assets --input /path/to/StreamingAssets --output ./Output --version '23,^buddies\\s*plus$' --layout flat
+```
+
 Export `maidata.txt` with display levels:
 
 ```bash
@@ -152,6 +158,7 @@ Selection rules:
 - when `--id` is provided and `--difficulty` is omitted: export all difficulties for matched ids
 - when both are provided: export only matched difficulties for matched ids
 - `--id` and `--difficulty` accept comma-separated filters, and each filter can be an exact number or a regex
+- `--version` accepts comma-separated filters, and each filter can be a version id (number), version name, or a regex
 - `--difficulty` uses exported `maidata` numbering: standard charts are usually `2..6`, utage is `7`
 - for Utage tracks, when both `*_L.ma2` and `*_R.ma2` exist in the same chart folder, MaiConv exports two outputs and appends `(L)` / `(R)` to both folder name and `maidata` `&title=`
 - `--difficulty 7` matches both `(L)` and `(R)` outputs for split Utage charts

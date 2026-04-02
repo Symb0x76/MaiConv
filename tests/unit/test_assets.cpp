@@ -2410,3 +2410,31 @@ TEST_CASE("assets supports comma-separated and regex difficulty filters")
 
   fs::remove_all(temp_root);
 }
+
+TEST_CASE("assets supports version filters by version id and regex name")
+{
+  const fs::path temp_root = unique_temp_dir("assets_version_multi_regex");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A000", "000931", "VersionById", "POPS", "PRiSM",
+               {2});
+  create_track(assets_root / "A000", "000932", "VersionByRegex", "POPS",
+               "BUDDiES PLUS", {2});
+  create_track(assets_root / "A000", "000933", "VersionSkipped", "POPS",
+               "FESTiVAL", {2});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.target_version_filters = {"23,^buddies\\s*plus$"};
+
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "000931_VersionById" / "maidata.txt"));
+  REQUIRE(fs::exists(output_root / "000932_VersionByRegex" / "maidata.txt"));
+  REQUIRE_FALSE(fs::exists(output_root / "000933_VersionSkipped"));
+
+  fs::remove_all(temp_root);
+}

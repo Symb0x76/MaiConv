@@ -577,6 +577,7 @@ int main(int argc, char **argv)
   std::string assets_output;
   std::string assets_id;
   std::string assets_difficulty;
+  std::string assets_version;
   std::string assets_music;
   std::string assets_cover;
   std::string assets_video;
@@ -614,6 +615,10 @@ int main(int argc, char **argv)
       "Difficulty filter using exported maidata numbering 1..7 "
       "(optional; comma-separated values/regex, with --id set and "
       "no --difficulty export all difficulties)");
+  auto *assets_version_opt = assets_cmd->add_option(
+      "--song-version,--version", assets_version,
+      "Version filter (optional; comma-separated values/regex; supports "
+      "version name or version id)");
   assets_cmd->add_option("--music", assets_music,
                          "Override music folder (default: auto-detect)");
   assets_cmd->add_option("--cover", assets_cover,
@@ -697,6 +702,9 @@ int main(int argc, char **argv)
     }
     if (assets_diff_opt->count() > 0 && !assets_difficulty.empty()) {
       options.target_difficulty_filters.push_back(assets_difficulty);
+    }
+    if (assets_version_opt->count() > 0 && !assets_version.empty()) {
+      options.target_version_filters.push_back(assets_version);
     }
     if (!assets_music.empty()) {
       options.music_path = assets_music;

@@ -36,10 +36,12 @@ struct AssetsOptions {
 
   std::vector<std::string> target_music_filters;
   std::vector<std::string> target_difficulty_filters;
+  std::vector<std::string> target_version_filters;
 
   // Backward-compatible single-value filters.
   std::optional<std::string> target_music_id;
   std::optional<int> target_difficulty;
+  std::optional<std::string> target_version;
 
   ChartFormat format = ChartFormat::Simai;
   AssetsExportLayout export_layout = AssetsExportLayout::Flat;
