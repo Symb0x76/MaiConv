@@ -13,22 +13,6 @@
 namespace maiconv {
 namespace {
 
-int to_int(const std::string &s, int fallback = 0) {
-  try {
-    return std::stoi(s);
-  } catch (...) {
-    return fallback;
-  }
-}
-
-double to_double(const std::string &s, double fallback = 0.0) {
-  try {
-    return std::stod(s);
-  } catch (...) {
-    return fallback;
-  }
-}
-
 bool looks_int_token(const std::string &value) {
   if (value.empty()) {
     return false;

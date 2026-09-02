@@ -4,6 +4,7 @@
 #include <cctype>
 #include <fstream>
 #include <stdexcept>
+#include <system_error>
 
 namespace maiconv {
 namespace {
@@ -102,6 +103,31 @@ std::string lower(std::string_view value) {
     return static_cast<char>(std::tolower(c));
   });
   return out;
+}
+
+int to_int(std::string_view value, int fallback) {
+  std::string owned(value);
+  try {
+    return std::stoi(owned);
+  } catch (...) {
+    return fallback;
+  }
+}
+
+double to_double(std::string_view value, double fallback) {
+  std::string owned(value);
+  try {
+    return std::stod(owned);
+  } catch (...) {
+    return fallback;
+  }
+}
+
+bool file_non_empty(const std::filesystem::path &path) {
+  std::error_code ec;
+  return std::filesystem::exists(path, ec) &&
+         std::filesystem::is_regular_file(path, ec) &&
+         std::filesystem::file_size(path, ec) > 0;
 }
 
 std::string pad_music_id(const std::string &id, std::size_t width) {

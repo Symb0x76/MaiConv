@@ -10,14 +10,6 @@
 namespace maiconv {
 namespace {
 
-int to_int(const std::string &s, int fallback = 0) {
-  try {
-    return std::stoi(s);
-  } catch (...) {
-    return fallback;
-  }
-}
-
 std::string replace_all(std::string input, std::string_view from,
                         std::string_view to) {
   if (from.empty()) {

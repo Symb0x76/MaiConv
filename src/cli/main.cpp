@@ -355,21 +355,6 @@ parse_assets_log_level(const std::string &value) {
   return std::nullopt;
 }
 
-std::string trim_copy(std::string_view value) {
-  std::size_t begin = 0;
-  while (begin < value.size() &&
-         std::isspace(static_cast<unsigned char>(value[begin])) != 0) {
-    ++begin;
-  }
-
-  std::size_t end = value.size();
-  while (end > begin &&
-         std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
-    --end;
-  }
-  return std::string(value.substr(begin, end - begin));
-}
-
 bool apply_assets_export_type_token(maiconv::AssetsOptions &options,
                                     const std::string &token) {
   if (token == "chart" || token == "maidata" || token == "maidata.txt" ||
@@ -647,7 +632,7 @@ int main(int argc, char **argv) {
       options.export_video = false;
 
       for (const auto &raw_token : assets_types) {
-        const std::string token = maiconv::lower(trim_copy(raw_token));
+        const std::string token = maiconv::lower(maiconv::trim(raw_token));
         if (token.empty()) {
           throw CLI::ValidationError("--types", "contains empty type item");
         }

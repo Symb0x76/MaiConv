@@ -9,22 +9,6 @@
 namespace maiconv {
 namespace {
 
-int to_int(const std::string &s, int fallback = 0) {
-  try {
-    return std::stoi(s);
-  } catch (...) {
-    return fallback;
-  }
-}
-
-double to_double(const std::string &s, double fallback = 0.0) {
-  try {
-    return std::stod(s);
-  } catch (...) {
-    return fallback;
-  }
-}
-
 bool is_digit_token(const std::string &s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) {
     return std::isdigit(c) != 0;

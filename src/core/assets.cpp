@@ -73,13 +73,6 @@ detect_image_extension_by_magic(const std::filesystem::path &path) {
   return std::nullopt;
 }
 
-bool file_non_empty(const std::filesystem::path &path) {
-  std::error_code ec;
-  return std::filesystem::exists(path, ec) &&
-         std::filesystem::is_regular_file(path, ec) &&
-         std::filesystem::file_size(path, ec) > 0;
-}
-
 double estimate_chart_duration_seconds(const Chart &chart) {
   int max_tick = 0;
   for (const auto &note : chart.notes()) {
@@ -95,14 +88,6 @@ double estimate_chart_duration_seconds(const Chart &chart) {
     }
   }
   return chart.ticks_to_seconds(max_tick);
-}
-
-int to_int(const std::string &s, int fallback = 0) {
-  try {
-    return std::stoi(s);
-  } catch (...) {
-    return fallback;
-  }
 }
 
 std::string normalize_version_name_key(std::string value) {
@@ -365,21 +350,6 @@ std::string music_folder_id_key(const std::filesystem::path &folder) {
   return pad_music_id(folder_name, 6);
 }
 
-std::string trim_copy(std::string_view value) {
-  std::size_t begin = 0;
-  while (begin < value.size() &&
-         std::isspace(static_cast<unsigned char>(value[begin])) != 0) {
-    ++begin;
-  }
-
-  std::size_t end = value.size();
-  while (end > begin &&
-         std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
-    --end;
-  }
-  return std::string(value.substr(begin, end - begin));
-}
-
 std::vector<std::string> split_filter_expression(std::string_view expression) {
   std::vector<std::string> tokens;
   std::string current;
@@ -416,7 +386,7 @@ std::vector<std::string> split_filter_expression(std::string_view expression) {
 
     if (c == ',' && bracket_depth == 0 && brace_depth == 0 &&
         paren_depth == 0) {
-      tokens.push_back(trim_copy(current));
+      tokens.push_back(trim(current));
       current.clear();
       continue;
     }
@@ -424,7 +394,7 @@ std::vector<std::string> split_filter_expression(std::string_view expression) {
     current.push_back(c);
   }
 
-  tokens.push_back(trim_copy(current));
+  tokens.push_back(trim(current));
   return tokens;
 }
 

@@ -203,12 +203,6 @@ int64_t read_i64_be(const uint8_t *p) {
                               static_cast<uint64_t>(p[7]));
 }
 
-bool file_non_empty(const std::filesystem::path &path) {
-  return std::filesystem::exists(path) &&
-         std::filesystem::is_regular_file(path) &&
-         std::filesystem::file_size(path) > 0;
-}
-
 class TempWorkspacePool {
 public:
   TempWorkspacePool() {
