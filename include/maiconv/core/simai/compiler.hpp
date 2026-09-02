@@ -4,13 +4,11 @@
 
 #include <string>
 
-namespace maiconv::simai
-{
+namespace maiconv::simai {
 
-    class Compiler
-    {
-    public:
-        std::string compile_chart(const Chart &chart) const;
-    };
+class Compiler {
+public:
+  std::string compile_chart(const Chart &chart) const;
+};
 
 } // namespace maiconv::simai

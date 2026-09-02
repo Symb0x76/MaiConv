@@ -5,6 +5,9 @@ build/
 .vscode/
 *.code-workspace
 
+# Claude Code
+.claude/
+
 # Test assets
 StreamingAssets/
 

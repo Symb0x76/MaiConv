@@ -6,11 +6,8 @@ using namespace maiconv;
 
 TEST_CASE("ma2 parser basic tap") {
   const std::vector<std::string> lines = {
-      "VERSION\t1.03.00",
-      "BPM_DEF\t0\t0\t120",
-      "MET_DEF\t0\t0\t4\t4",
-      "NMTAP\t0\t0\t0",
-      "NMSI_\t0\t96\t0\t96\t24\t1",
+      "VERSION\t1.03.00", "BPM_DEF\t0\t0\t120",         "MET_DEF\t0\t0\t4\t4",
+      "NMTAP\t0\t0\t0",   "NMSI_\t0\t96\t0\t96\t24\t1",
   };
 
   Ma2Parser parser;

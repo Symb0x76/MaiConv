@@ -51,27 +51,32 @@ struct Note {
   }
 
   [[nodiscard]] bool is_note() const {
-    return type != NoteType::Bpm && type != NoteType::Measure && type != NoteType::Rest;
+    return type != NoteType::Bpm && type != NoteType::Measure &&
+           type != NoteType::Rest;
   }
 };
 
 class Chart {
- public:
+public:
   explicit Chart(int definition = 384);
 
   int definition() const { return definition_; }
 
-  std::vector<Note>& notes() { return notes_; }
-  const std::vector<Note>& notes() const { return notes_; }
+  std::vector<Note> &notes() { return notes_; }
+  const std::vector<Note> &notes() const { return notes_; }
 
-  std::vector<BpmChange>& bpm_changes() { return bpm_changes_; }
-  const std::vector<BpmChange>& bpm_changes() const { return bpm_changes_; }
+  std::vector<BpmChange> &bpm_changes() { return bpm_changes_; }
+  const std::vector<BpmChange> &bpm_changes() const { return bpm_changes_; }
 
-  std::vector<MeasureChange>& measure_changes() { return measure_changes_; }
-  const std::vector<MeasureChange>& measure_changes() const { return measure_changes_; }
+  std::vector<MeasureChange> &measure_changes() { return measure_changes_; }
+  const std::vector<MeasureChange> &measure_changes() const {
+    return measure_changes_;
+  }
 
   int source_bar_count() const { return source_bar_count_; }
-  void set_source_bar_count(int count) { source_bar_count_ = count < 0 ? 0 : count; }
+  void set_source_bar_count(int count) {
+    source_bar_count_ = count < 0 ? 0 : count;
+  }
 
   void normalize();
 
@@ -83,7 +88,7 @@ class Chart {
   void shift_by_offset(int overall_ticks);
   void rotate(FlipMethod method);
 
- private:
+private:
   int definition_;
   std::vector<Note> notes_;
   std::vector<BpmChange> bpm_changes_;
@@ -93,5 +98,4 @@ class Chart {
   static int rotate_key(int key, FlipMethod method);
 };
 
-
-}  // namespace maiconv
+} // namespace maiconv

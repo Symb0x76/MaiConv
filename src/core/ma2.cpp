@@ -13,7 +13,7 @@
 namespace maiconv {
 namespace {
 
-int to_int(const std::string& s, int fallback = 0) {
+int to_int(const std::string &s, int fallback = 0) {
   try {
     return std::stoi(s);
   } catch (...) {
@@ -21,7 +21,7 @@ int to_int(const std::string& s, int fallback = 0) {
   }
 }
 
-double to_double(const std::string& s, double fallback = 0.0) {
+double to_double(const std::string &s, double fallback = 0.0) {
   try {
     return std::stod(s);
   } catch (...) {
@@ -29,7 +29,7 @@ double to_double(const std::string& s, double fallback = 0.0) {
   }
 }
 
-bool looks_int_token(const std::string& value) {
+bool looks_int_token(const std::string &value) {
   if (value.empty()) {
     return false;
   }
@@ -125,15 +125,27 @@ ParsedType parse_type(std::string raw) {
   return out;
 }
 
-NoteType map_note_type(const std::string& base) {
+NoteType map_note_type(const std::string &base) {
   static const std::unordered_map<std::string, NoteType> kMap = {
-      {"TAP", NoteType::Tap},       {"STR", NoteType::SlideStart},   {"NST", NoteType::SlideStart},
-      {"NSS", NoteType::SlideStart}, {"TTP", NoteType::TouchTap},     {"HLD", NoteType::Hold},
-      {"THO", NoteType::TouchHold}, {"SI_", NoteType::SlideStraight},
-      {"SV_", NoteType::SlideV},    {"SF_", NoteType::SlideWifi},    {"SCL", NoteType::SlideCurveLeft},
-      {"SCR", NoteType::SlideCurveRight},                            {"SUL", NoteType::SlideQ},
-      {"SUR", NoteType::SlideP},    {"SLL", NoteType::SlideVTurnLeft}, {"SLR", NoteType::SlideVTurnRight},
-      {"SXL", NoteType::SlideQQ},   {"SXR", NoteType::SlidePP},      {"SSL", NoteType::SlideS},
+      {"TAP", NoteType::Tap},
+      {"STR", NoteType::SlideStart},
+      {"NST", NoteType::SlideStart},
+      {"NSS", NoteType::SlideStart},
+      {"TTP", NoteType::TouchTap},
+      {"HLD", NoteType::Hold},
+      {"THO", NoteType::TouchHold},
+      {"SI_", NoteType::SlideStraight},
+      {"SV_", NoteType::SlideV},
+      {"SF_", NoteType::SlideWifi},
+      {"SCL", NoteType::SlideCurveLeft},
+      {"SCR", NoteType::SlideCurveRight},
+      {"SUL", NoteType::SlideQ},
+      {"SUR", NoteType::SlideP},
+      {"SLL", NoteType::SlideVTurnLeft},
+      {"SLR", NoteType::SlideVTurnRight},
+      {"SXL", NoteType::SlideQQ},
+      {"SXR", NoteType::SlidePP},
+      {"SSL", NoteType::SlideS},
       {"SSR", NoteType::SlideZ},
   };
   const auto it = kMap.find(base);
@@ -145,84 +157,86 @@ NoteType map_note_type(const std::string& base) {
 
 std::string base_ma2_type(NoteType type) {
   switch (type) {
-    case NoteType::Tap:
-      return "TAP";
-    case NoteType::SlideStart:
-      return "STR";
-    case NoteType::TouchTap:
-      return "TTP";
-    case NoteType::Hold:
-      return "HLD";
-    case NoteType::TouchHold:
-      return "THO";
-    case NoteType::SlideStraight:
-      return "SI_";
-    case NoteType::SlideV:
-      return "SV_";
-    case NoteType::SlideWifi:
-      return "SF_";
-    case NoteType::SlideCurveLeft:
-      return "SCL";
-    case NoteType::SlideCurveRight:
-      return "SCR";
-    case NoteType::SlideQ:
-      return "SUL";
-    case NoteType::SlideP:
-      return "SUR";
-    case NoteType::SlideVTurnLeft:
-      return "SLL";
-    case NoteType::SlideVTurnRight:
-      return "SLR";
-    case NoteType::SlideQQ:
-      return "SXL";
-    case NoteType::SlidePP:
-      return "SXR";
-    case NoteType::SlideS:
-      return "SSL";
-    case NoteType::SlideZ:
-      return "SSR";
-    default:
-      return "RST";
+  case NoteType::Tap:
+    return "TAP";
+  case NoteType::SlideStart:
+    return "STR";
+  case NoteType::TouchTap:
+    return "TTP";
+  case NoteType::Hold:
+    return "HLD";
+  case NoteType::TouchHold:
+    return "THO";
+  case NoteType::SlideStraight:
+    return "SI_";
+  case NoteType::SlideV:
+    return "SV_";
+  case NoteType::SlideWifi:
+    return "SF_";
+  case NoteType::SlideCurveLeft:
+    return "SCL";
+  case NoteType::SlideCurveRight:
+    return "SCR";
+  case NoteType::SlideQ:
+    return "SUL";
+  case NoteType::SlideP:
+    return "SUR";
+  case NoteType::SlideVTurnLeft:
+    return "SLL";
+  case NoteType::SlideVTurnRight:
+    return "SLR";
+  case NoteType::SlideQQ:
+    return "SXL";
+  case NoteType::SlidePP:
+    return "SXR";
+  case NoteType::SlideS:
+    return "SSL";
+  case NoteType::SlideZ:
+    return "SSR";
+  default:
+    return "RST";
   }
 }
 
-std::string prefixed_type(const Note& note) {
+std::string prefixed_type(const Note &note) {
   std::string prefix = "NM";
   switch (note.state) {
-    case SpecialState::Normal:
-      prefix = "NM";
-      break;
-    case SpecialState::Break:
-      prefix = "BR";
-      break;
-    case SpecialState::Ex:
-      prefix = "EX";
-      break;
-    case SpecialState::BreakEx:
-      prefix = "BX";
-      break;
-    case SpecialState::ConnectingSlide:
-      prefix = "CN";
-      break;
+  case SpecialState::Normal:
+    prefix = "NM";
+    break;
+  case SpecialState::Break:
+    prefix = "BR";
+    break;
+  case SpecialState::Ex:
+    prefix = "EX";
+    break;
+  case SpecialState::BreakEx:
+    prefix = "BX";
+    break;
+  case SpecialState::ConnectingSlide:
+    prefix = "CN";
+    break;
   }
   return prefix + base_ma2_type(note.type);
 }
 
-std::string ma2_type_for_format(const Note& note, ChartFormat format) {
+std::string ma2_type_for_format(const Note &note, ChartFormat format) {
   if (format == ChartFormat::Ma2_103) {
     const bool is_slide_start = note.type == NoteType::SlideStart;
     if (note.type == NoteType::Tap || note.type == NoteType::SlideStart) {
       if (note.state == SpecialState::Ex) {
         return is_slide_start ? "XST" : "XTP";
       }
-      if (note.state == SpecialState::Break || note.state == SpecialState::BreakEx) {
+      if (note.state == SpecialState::Break ||
+          note.state == SpecialState::BreakEx) {
         return is_slide_start ? "BST" : "BRK";
       }
       return is_slide_start ? "STR" : "TAP";
     }
 
     if (note.type == NoteType::Hold) {
-      if (note.state == SpecialState::Ex || note.state == SpecialState::BreakEx) {
+      if (note.state == SpecialState::Ex ||
+          note.state == SpecialState::BreakEx) {
         return "XHO";
       }
       return "HLD";
@@ -272,11 +286,11 @@ bool is_hold_genre_type(NoteType type) {
   return type == NoteType::Hold || type == NoteType::TouchHold;
 }
 
-Ma2Stats compute_ma2_stats(const Chart& chart) {
+Ma2Stats compute_ma2_stats(const Chart &chart) {
   Ma2Stats stats;
   std::map<int, int> each_pairs_by_stamp;
 
-  for (const auto& note : chart.notes()) {
+  for (const auto &note : chart.notes()) {
     if (note.state != SpecialState::ConnectingSlide) {
       ++stats.all_note_rec;
     }
@@ -347,7 +361,7 @@ Ma2Stats compute_ma2_stats(const Chart& chart) {
     }
   }
 
-  for (const auto& [stamp, count] : each_pairs_by_stamp) {
+  for (const auto &[stamp, count] : each_pairs_by_stamp) {
     (void)stamp;
     if (count > 1) {
       ++stats.each_pairs;
@@ -356,24 +370,24 @@ Ma2Stats compute_ma2_stats(const Chart& chart) {
   return stats;
 }
 
-std::string compose_ma2_statistics(const Chart& chart, ChartFormat format) {
+std::string compose_ma2_statistics(const Chart &chart, ChartFormat format) {
   const Ma2Stats stats = compute_ma2_stats(chart);
   const bool include_104 = (format == ChartFormat::Ma2_104);
 
-  const int tap_num =
-      stats.normal_tap + stats.ex_tap + stats.normal_slide_start +
-      stats.ex_slide_start + stats.touch_tap;
-  const int break_num =
-      stats.break_tap + stats.break_ex_tap + stats.break_hold +
-      stats.break_ex_hold + stats.break_slide_start +
-      stats.break_ex_slide_start + stats.break_slide;
+  const int tap_num = stats.normal_tap + stats.ex_tap +
+                      stats.normal_slide_start + stats.ex_slide_start +
+                      stats.touch_tap;
+  const int break_num = stats.break_tap + stats.break_ex_tap +
+                        stats.break_hold + stats.break_ex_hold +
+                        stats.break_slide_start + stats.break_ex_slide_start +
+                        stats.break_slide;
   const int hold_num = stats.normal_hold + stats.ex_hold + stats.touch_hold;
   const int slide_num = stats.normal_slide;
   const int all_note_num = tap_num + break_num + hold_num + slide_num;
 
-  const int tap_judge_num =
-      tap_num + stats.break_tap + stats.break_ex_tap +
-      stats.break_slide_start + stats.break_ex_slide_start;
+  const int tap_judge_num = tap_num + stats.break_tap + stats.break_ex_tap +
+                            stats.break_slide_start +
+                            stats.break_ex_slide_start;
   const int hold_judge_num =
       (hold_num + stats.break_hold + stats.break_ex_hold) * 2;
   const int slide_judge_num = stats.normal_slide + stats.break_slide;
@@ -386,12 +400,12 @@ std::string compose_ma2_statistics(const Chart& chart, ChartFormat format) {
   const int all_score = tap_score + break_score + hold_score + slide_score;
   const int score_s = round_to_even_int(all_score * 0.97);
   const int score_ss = round_to_even_int(all_score * 0.99);
-  const int rated_achievement = all_score == 0
-                                    ? 0
-                                    : round_to_even_int(
-                                          (1.0 + (static_cast<double>(break_num) * 100.0) /
-                                                     static_cast<double>(all_score)) *
-                                          10000.0);
+  const int rated_achievement =
+      all_score == 0
+          ? 0
+          : round_to_even_int((1.0 + (static_cast<double>(break_num) * 100.0) /
+                                         static_cast<double>(all_score)) *
+                              10000.0);
 
   std::ostringstream out;
   out << "T_REC_TAP\t" << stats.normal_tap << "\n";
@@ -443,22 +457,24 @@ std::string compose_ma2_statistics(const Chart& chart, ChartFormat format) {
   return out.str();
 }
 
-}  // namespace
+} // namespace
 
-std::vector<std::string> Ma2Tokenizer::tokenize_file(const std::filesystem::path& path) const {
+std::vector<std::string>
+Ma2Tokenizer::tokenize_file(const std::filesystem::path &path) const {
   return read_lines(path);
 }
 
-std::vector<std::string> Ma2Tokenizer::tokenize_text(const std::string& text) const {
+std::vector<std::string>
+Ma2Tokenizer::tokenize_text(const std::string &text) const {
   return split(text, '\n');
 }
 
-Chart Ma2Parser::parse(const std::vector<std::string>& lines) const {
+Chart Ma2Parser::parse(const std::vector<std::string> &lines) const {
   Chart chart;
   chart.bpm_changes().push_back(BpmChange{0, 0, 120.0});
   chart.measure_changes().push_back(MeasureChange{0, 0, 4, 4});
 
-  for (const auto& raw_line : lines) {
+  for (const auto &raw_line : lines) {
     const std::string line = trim(raw_line);
     if (line.empty() || line[0] == '#') {
       continue;
@@ -471,36 +487,44 @@ Chart Ma2Parser::parse(const std::vector<std::string>& lines) const {
 
     const std::string type = fields[0];
     if (type == "BPM_DEF") {
-      if (fields.size() >= 4 && looks_int_token(fields[1]) && looks_int_token(fields[2])) {
+      if (fields.size() >= 4 && looks_int_token(fields[1]) &&
+          looks_int_token(fields[2])) {
         chart.bpm_changes().clear();
-        chart.bpm_changes().push_back(BpmChange{to_int(fields[1]), to_int(fields[2]), to_double(fields[3], 120.0)});
+        chart.bpm_changes().push_back(BpmChange{
+            to_int(fields[1]), to_int(fields[2]), to_double(fields[3], 120.0)});
       } else if (fields.size() >= 2) {
         chart.bpm_changes().clear();
-        chart.bpm_changes().push_back(BpmChange{0, 0, to_double(fields[1], 120.0)});
+        chart.bpm_changes().push_back(
+            BpmChange{0, 0, to_double(fields[1], 120.0)});
       }
       continue;
     }
     if (type == "MET_DEF") {
-      if (fields.size() >= 5 && looks_int_token(fields[1]) && looks_int_token(fields[2])) {
+      if (fields.size() >= 5 && looks_int_token(fields[1]) &&
+          looks_int_token(fields[2])) {
         chart.measure_changes().clear();
         chart.measure_changes().push_back(
-            MeasureChange{to_int(fields[1]), to_int(fields[2]), to_int(fields[3], 4), to_int(fields[4], 4)});
+            MeasureChange{to_int(fields[1]), to_int(fields[2]),
+                          to_int(fields[3], 4), to_int(fields[4], 4)});
       } else if (fields.size() >= 3) {
         chart.measure_changes().clear();
-        chart.measure_changes().push_back(MeasureChange{0, 0, to_int(fields[1], 4), to_int(fields[2], 4)});
+        chart.measure_changes().push_back(
+            MeasureChange{0, 0, to_int(fields[1], 4), to_int(fields[2], 4)});
       }
       continue;
     }
     if (type == "BPM") {
       if (fields.size() >= 4) {
-        chart.bpm_changes().push_back(BpmChange{to_int(fields[1]), to_int(fields[2]), to_double(fields[3], 120.0)});
+        chart.bpm_changes().push_back(BpmChange{
+            to_int(fields[1]), to_int(fields[2]), to_double(fields[3], 120.0)});
       }
       continue;
     }
     if (type == "MET") {
       if (fields.size() >= 5) {
         chart.measure_changes().push_back(
-            MeasureChange{to_int(fields[1]), to_int(fields[2]), to_int(fields[3], 4), to_int(fields[4], 4)});
+            MeasureChange{to_int(fields[1]), to_int(fields[2]),
+                          to_int(fields[3], 4), to_int(fields[4], 4)});
       }
       continue;
     }
@@ -571,15 +595,16 @@ Chart Ma2Parser::parse(const std::vector<std::string>& lines) const {
   return chart;
 }
 
-std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const {
+std::string Ma2Composer::compose(const Chart &source,
+                                 ChartFormat format) const {
   Chart chart = source;
   chart.normalize();
 
   std::vector<BpmChange> deduped_bpms;
   deduped_bpms.reserve(chart.bpm_changes().size());
-  for (const auto& bpm : chart.bpm_changes()) {
+  for (const auto &bpm : chart.bpm_changes()) {
     if (!deduped_bpms.empty()) {
-      const auto& prev = deduped_bpms.back();
+      const auto &prev = deduped_bpms.back();
       if (prev.bar == bpm.bar && prev.tick == bpm.tick && prev.bpm == bpm.bpm) {
         continue;
       }
@@ -591,7 +616,8 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
   }
 
   std::ostringstream out;
-  const std::string version = (format == ChartFormat::Ma2_104) ? "1.04.00" : "1.03.00";
+  const std::string version =
+      (format == ChartFormat::Ma2_104) ? "1.04.00" : "1.03.00";
   out << "VERSION\t0.00.00\t" << version << "\n";
   out << "FES_MODE\t0\n";
 
@@ -605,36 +631,42 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
   for (std::size_t i = 0; i < deduped_bpms.size() && i < 4; ++i) {
     bpm_def_values[i] = deduped_bpms[i].bpm;
   }
-  out << "BPM_DEF\t" << std::fixed << std::setprecision(3) << bpm_def_values[0] << "\t"
-      << bpm_def_values[1] << "\t" << bpm_def_values[2] << "\t" << bpm_def_values[3] << "\t\n";
+  out << "BPM_DEF\t" << std::fixed << std::setprecision(3) << bpm_def_values[0]
+      << "\t" << bpm_def_values[1] << "\t" << bpm_def_values[2] << "\t"
+      << bpm_def_values[3] << "\t\n";
   out.unsetf(std::ios::floatfield);
   out << std::setprecision(6);
 
-  const auto first_measure = chart.measure_changes().empty() ? MeasureChange{0, 0, 4, 4} : chart.measure_changes().front();
-  out << "MET_DEF\t" << first_measure.quaver << "\t" << first_measure.beats << "\n";
+  const auto first_measure = chart.measure_changes().empty()
+                                 ? MeasureChange{0, 0, 4, 4}
+                                 : chart.measure_changes().front();
+  out << "MET_DEF\t" << first_measure.quaver << "\t" << first_measure.beats
+      << "\n";
   out << "RESOLUTION\t" << chart.definition() << "\n";
   out << "CLK_DEF\t" << chart.definition() << "\n";
   out << "COMPATIBLE_CODE\tMA2\n\n";
 
   for (std::size_t i = 0; i < deduped_bpms.size(); ++i) {
-    const auto& bpm = deduped_bpms[i];
+    const auto &bpm = deduped_bpms[i];
     out << "BPM\t" << bpm.bar << "\t" << bpm.tick << "\t" << bpm.bpm << "\n";
   }
 
-  const auto& measures = chart.measure_changes();
+  const auto &measures = chart.measure_changes();
   if (measures.size() <= 1) {
-    out << "MET\t0\t0\t" << first_measure.quaver << "\t" << first_measure.beats << "\n";
+    out << "MET\t0\t0\t" << first_measure.quaver << "\t" << first_measure.beats
+        << "\n";
   } else {
     for (std::size_t i = 1; i < measures.size(); ++i) {
-      const auto& target = measures[i];
-      const auto& source = (i == 1) ? first_measure : measures[i - 1];
-      out << "MET\t" << target.bar << "\t" << target.tick << "\t" << source.quaver << "\t" << source.beats << "\n";
+      const auto &target = measures[i];
+      const auto &source = (i == 1) ? first_measure : measures[i - 1];
+      out << "MET\t" << target.bar << "\t" << target.tick << "\t"
+          << source.quaver << "\t" << source.beats << "\n";
     }
   }
 
   out << "\n";
 
-  for (const auto& note : chart.notes()) {
+  for (const auto &note : chart.notes()) {
     if (!note.is_note()) {
       continue;
     }
@@ -642,15 +674,18 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
     out << type << "\t" << note.bar << "\t" << note.tick << "\t" << note.key;
 
     if (note.type == NoteType::TouchTap) {
-      out << "\t" << (note.touch_group.empty() ? "C" : note.touch_group) << "\t" << (note.special_effect ? 1 : 0)
-          << "\tM1";
+      out << "\t" << (note.touch_group.empty() ? "C" : note.touch_group) << "\t"
+          << (note.special_effect ? 1 : 0) << "\tM1";
     } else if (note.type == NoteType::Hold) {
       out << "\t" << note.last_ticks;
     } else if (note.type == NoteType::TouchHold) {
-      out << "\t" << note.last_ticks << "\t" << (note.touch_group.empty() ? "C" : note.touch_group) << "\t"
-          << (note.special_effect ? 1 : 0) << "\t" << (note.touch_size.empty() ? "M1" : note.touch_size);
+      out << "\t" << note.last_ticks << "\t"
+          << (note.touch_group.empty() ? "C" : note.touch_group) << "\t"
+          << (note.special_effect ? 1 : 0) << "\t"
+          << (note.touch_size.empty() ? "M1" : note.touch_size);
     } else if (is_slide_type(note.type)) {
-      out << "\t" << note.wait_ticks << "\t" << note.last_ticks << "\t" << note.end_key;
+      out << "\t" << note.wait_ticks << "\t" << note.last_ticks << "\t"
+          << note.end_key;
     }
     out << "\n";
   }
@@ -661,4 +696,4 @@ std::string Ma2Composer::compose(const Chart& source, ChartFormat format) const 
   return out.str();
 }
 
-}  // namespace maiconv
+} // namespace maiconv

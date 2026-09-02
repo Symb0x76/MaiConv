@@ -2,10 +2,9 @@
 
 #include "maiconv/core/chart.hpp"
 
-namespace maiconv::simai
-{
+namespace maiconv::simai {
 
-    using BpmChange = maiconv::BpmChange;
-    using MeasureChange = maiconv::MeasureChange;
+using BpmChange = maiconv::BpmChange;
+using MeasureChange = maiconv::MeasureChange;
 
 } // namespace maiconv::simai

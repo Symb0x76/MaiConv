@@ -2,9 +2,8 @@
 
 #include "maiconv/core/chart.hpp"
 
-namespace maiconv::simai
-{
+namespace maiconv::simai {
 
-    using Note = maiconv::Note;
+using Note = maiconv::Note;
 
 } // namespace maiconv::simai
