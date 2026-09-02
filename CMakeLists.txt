@@ -178,6 +178,8 @@ add_library(MaiConv_core
     src/core/simai_parser.cpp
     src/core/simai_compiler.cpp
     src/core/assets.cpp
+    src/core/assets_filter.cpp
+    src/core/assets_parse.cpp
     src/core/zip_util.cpp
     src/uabe/Texture/lodepng.cpp
 )
