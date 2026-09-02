@@ -342,6 +342,21 @@ int source_root_numeric_priority(const std::filesystem::path &root) {
   return to_int(digits, -1);
 }
 
+// Higher numeric root priority wins; ties break by larger (lowercased,
+// normalized) path so ordering is deterministic across source roots.
+bool is_more_preferred(int root_priority, const std::string &tie_break_key,
+                       int other_root_priority,
+                       const std::string &other_tie_break_key) {
+  if (root_priority != other_root_priority) {
+    return root_priority > other_root_priority;
+  }
+  return tie_break_key > other_tie_break_key;
+}
+
+std::string root_pick_key(const std::filesystem::path &path) {
+  return lower(path_to_generic_utf8(path.lexically_normal()));
+}
+
 std::string music_folder_id_key(const std::filesystem::path &folder) {
   std::string folder_name = path_to_utf8(folder.filename());
   if (folder_name.rfind("music", 0) == 0) {
@@ -1023,17 +1038,15 @@ detect_asset_bases(const std::vector<std::filesystem::path> &source_roots,
       picks.push_back(AssetBasePick{
           candidate,
           source_root_numeric_priority(root),
-          lower(path_to_generic_utf8(candidate.lexically_normal())),
+          root_pick_key(candidate),
       });
     }
   }
 
   std::sort(picks.begin(), picks.end(),
             [](const AssetBasePick &lhs, const AssetBasePick &rhs) {
-              if (lhs.root_priority != rhs.root_priority) {
-                return lhs.root_priority > rhs.root_priority;
-              }
-              return lhs.tie_break_key > rhs.tie_break_key;
+              return is_more_preferred(lhs.root_priority, lhs.tie_break_key,
+                                       rhs.root_priority, rhs.tie_break_key);
             });
 
   std::vector<std::filesystem::path> bases;
@@ -2741,8 +2754,7 @@ int run_compile_assets(const AssetsOptions &options) {
 
         const std::filesystem::path folder = entry.path();
         const std::string id_key = music_folder_id_key(folder);
-        const std::string tie_break_key =
-            lower(path_to_generic_utf8(folder.lexically_normal()));
+        const std::string tie_break_key = root_pick_key(folder);
 
         auto it = folder_by_music_id.find(id_key);
         if (it == folder_by_music_id.end()) {
@@ -2751,9 +2763,9 @@ int run_compile_assets(const AssetsOptions &options) {
           continue;
         }
 
-        if (root_priority > it->second.root_priority ||
-            (root_priority == it->second.root_priority &&
-             tie_break_key > it->second.tie_break_key)) {
+        if (is_more_preferred(root_priority, tie_break_key,
+                              it->second.root_priority,
+                              it->second.tie_break_key)) {
           it->second = FolderPick{folder, root_priority, tie_break_key};
         }
       }
