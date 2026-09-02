@@ -178,6 +178,7 @@ add_library(MaiConv_core
     src/core/simai_parser.cpp
     src/core/simai_compiler.cpp
     src/core/assets.cpp
+    src/core/zip_util.cpp
     src/uabe/Texture/lodepng.cpp
 )
 
@@ -263,6 +264,7 @@ if(MAICONV_BUILD_TESTS)
         tests/unit/test_media.cpp
         tests/unit/test_simai.cpp
         tests/unit/test_assets.cpp
+        tests/unit/test_zip.cpp
         tests/unit/test_uabe_lz4.cpp
     )
     target_link_libraries(MaiConv_unit_tests

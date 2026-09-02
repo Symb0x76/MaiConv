@@ -7,6 +7,7 @@
 #include "maiconv/core/media/media_cover.hpp"
 #include "maiconv/core/media/media_video.hpp"
 #include "maiconv/core/simai/compiler.hpp"
+#include "maiconv/core/zip_util.hpp"
 
 #include <tinyxml2.h>
 
@@ -1651,8 +1652,7 @@ void write_collections(
 }
 
 bool zip_and_remove(const std::filesystem::path &folder) {
-  (void)folder;
-  return false;
+  return zip_folder_and_remove(folder);
 }
 
 std::string compose_simai_document(const TrackInfo &info,

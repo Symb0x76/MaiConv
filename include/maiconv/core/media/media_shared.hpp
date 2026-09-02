@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -32,13 +34,34 @@ std::vector<std::string> media_shared_resolve_ffmpeg_mp3_encoders();
 void media_shared_remove_file_if_exists(const std::filesystem::path &path);
 std::string media_shared_path_to_utf8(const std::filesystem::path &path);
 
+std::vector<std::string> media_shared_resolve_ffmpeg_h264_encoders();
+std::vector<std::string> media_shared_resolve_ffmpeg_vp9_encoders();
+bool media_shared_write_binary_file(const std::filesystem::path &path,
+                                    const std::vector<uint8_t> &data);
+bool media_shared_read_exact(std::istream &in, uint8_t *out, std::size_t size);
+uint16_t media_shared_read_u16_be(const uint8_t *p);
+uint16_t media_shared_read_u16_le(const uint8_t *p);
+uint32_t media_shared_read_u32_be(const uint8_t *p);
+
 #if defined(_WIN32)
 std::wstring media_shared_widen_ascii(const std::string &value);
 void media_shared_append_audio_hwaccel_arg(std::vector<std::wstring> &args);
 bool media_shared_run_ffmpeg_process(const std::vector<std::wstring> &args);
+void media_shared_append_hwaccel_arg(std::vector<std::wstring> &args);
+bool media_shared_run_ffmpeg_capture_stdout(
+    const std::vector<std::wstring> &args, std::vector<uint8_t> &stdout_bytes);
+bool media_shared_run_ffmpeg_feed_stdin(
+    const std::vector<std::wstring> &args,
+    const std::vector<uint8_t> &stdin_bytes);
 #else
 void media_shared_append_audio_hwaccel_arg(std::vector<std::string> &args);
 bool media_shared_run_ffmpeg_process(const std::vector<std::string> &args);
+void media_shared_append_hwaccel_arg(std::vector<std::string> &args);
+bool media_shared_run_ffmpeg_capture_stdout(
+    const std::vector<std::string> &args, std::vector<uint8_t> &stdout_bytes);
+bool media_shared_run_ffmpeg_feed_stdin(
+    const std::vector<std::string> &args,
+    const std::vector<uint8_t> &stdin_bytes);
 #endif
 
 } // namespace maiconv
