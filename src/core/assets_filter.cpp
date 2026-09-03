@@ -24,50 +24,54 @@ std::string normalize_version_name_key(std::string value) {
   return value;
 }
 
-std::string version_name_from_id(std::string_view version_id) {
-  static const std::unordered_map<std::string, std::string> kVersionNameById = {
-      {"0", "maimai"},         {"1", "maimai PLUS"},   {"2", "GreeN"},
-      {"3", "GreeN PLUS"},     {"4", "ORANGE"},        {"5", "ORANGE PLUS"},
-      {"6", "PiNK"},           {"7", "PiNK PLUS"},     {"8", "MURASAKi"},
-      {"9", "MURASAKi PLUS"},  {"10", "MiLK"},         {"11", "MiLK PLUS"},
-      {"12", "FiNALE"},        {"13", "maimaDX"},      {"14", "maimaDX PLUS"},
-      {"15", "Splash"},        {"16", "Splash PLUS"},  {"17", "UNiVERSE"},
-      {"18", "UNiVERSE PLUS"}, {"19", "FESTiVAL"},     {"20", "FESTiVAL PLUS"},
-      {"21", "BUDDiES"},       {"22", "BUDDiES PLUS"}, {"23", "PRiSM"},
-      {"24", "PRiSM PLUS"},    {"25", "CiRCLE"},
-  };
+// Canonical version-name spelling per version id, plus legacy name aliases
+// (e.g. "deluxe") that map to an existing id. Kept as one constexpr table so
+// the id<->name relations cannot drift apart.
+struct VersionEntry {
+  std::string_view id;
+  std::string_view name;
+  std::string_view alias; // optional alternate lookup name
+};
 
+constexpr VersionEntry kVersionCatalog[] = {
+    {"0", "maimai", {}},         {"1", "maimai PLUS", {}},
+    {"2", "GreeN", {}},          {"3", "GreeN PLUS", {}},
+    {"4", "ORANGE", {}},         {"5", "ORANGE PLUS", {}},
+    {"6", "PiNK", {}},           {"7", "PiNK PLUS", {}},
+    {"8", "MURASAKi", {}},       {"9", "MURASAKi PLUS", {}},
+    {"10", "MiLK", {}},          {"11", "MiLK PLUS", {}},
+    {"12", "FiNALE", {}},        {"13", "maimaDX", {}},
+    {"14", "maimaDX PLUS", {}},  {"15", "Splash", {}},
+    {"16", "Splash PLUS", {}},   {"17", "UNiVERSE", {}},
+    {"18", "UNiVERSE PLUS", {}}, {"19", "FESTiVAL", {}},
+    {"20", "FESTiVAL PLUS", {}}, {"21", "BUDDiES", {}},
+    {"22", "BUDDiES PLUS", {}},  {"23", "PRiSM", {}},
+    {"24", "PRiSM PLUS", {}},    {"25", "CiRCLE", {}},
+    {"13", "maimaDX", "deluxe"}, {"14", "maimaDX PLUS", "deluxeplus"},
+};
+
+std::string version_name_from_id(std::string_view version_id) {
   const std::string key = trim(std::string(version_id));
-  const auto it = kVersionNameById.find(key);
-  if (it == kVersionNameById.end()) {
-    return {};
+  for (const auto &entry : kVersionCatalog) {
+    if (entry.id == key) {
+      return std::string(entry.name);
+    }
   }
-  return it->second;
+  return {};
 }
 
 std::string version_id_from_name(std::string_view version_name) {
-  static const std::unordered_map<std::string, std::string> kVersionIdByName = {
-      {"maimai", "0"},       {"maimaiplus", "1"},    {"green", "2"},
-      {"greenplus", "3"},    {"orange", "4"},        {"orangeplus", "5"},
-      {"pink", "6"},         {"pinkplus", "7"},      {"murasaki", "8"},
-      {"murasakiplus", "9"}, {"milk", "10"},         {"milkplus", "11"},
-      {"finale", "12"},      {"maimadx", "13"},      {"maimadxplus", "14"},
-      {"deluxe", "13"},      {"deluxeplus", "14"},   {"splash", "15"},
-      {"splashplus", "16"},  {"universe", "17"},     {"universeplus", "18"},
-      {"festival", "19"},    {"festivalplus", "20"}, {"buddies", "21"},
-      {"buddiesplus", "22"}, {"prism", "23"},        {"prismplus", "24"},
-      {"circle", "25"},
-  };
-
   const std::string key = normalize_version_name_key(std::string(version_name));
   if (key.empty()) {
     return {};
   }
-  const auto it = kVersionIdByName.find(key);
-  if (it == kVersionIdByName.end()) {
-    return {};
+  for (const auto &entry : kVersionCatalog) {
+    if (normalize_version_name_key(std::string(entry.name)) == key ||
+        (!entry.alias.empty() && entry.alias == key)) {
+      return std::string(entry.id);
+    }
   }
-  return it->second;
+  return {};
 }
 
 bool is_decimal_number(std::string_view value) {
