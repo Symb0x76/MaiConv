@@ -6,7 +6,7 @@ option(MAICONV_ENABLE_UBSAN "Enable undefined behavior sanitizer" OFF)
 option(MAICONV_BUILD_TESTS "Build tests" ON)
 option(MAICONV_USE_CCACHE "Auto-detect and use ccache compiler launcher" ON)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "Export compile commands for tooling" FORCE)
