@@ -24,6 +24,21 @@ namespace {
 constexpr int kSuccess = 0;
 constexpr int kFailure = 2;
 
+// Executes a command body, converting exceptions into the uniform CLI error
+// report and failure exit code. Command bodies throw on failure.
+template <typename Fn> int run_and_report(Fn &&fn) {
+  try {
+    return fn();
+  } catch (const std::exception &ex) {
+    std::cerr << "Program cannot proceed because of following error returned:\n"
+              << ex.what() << "\n";
+    return kFailure;
+  } catch (...) {
+    std::cerr << "Program cannot proceed because of an unknown error\n";
+    return kFailure;
+  }
+}
+
 std::filesystem::path
 resolve_output_path(const std::string &output,
                     const std::string &default_file_name) {
@@ -103,7 +118,7 @@ void write_or_stdout(const std::string &output,
 int run_ma2_to(const std::filesystem::path &input, maiconv::ChartFormat format,
                const std::optional<maiconv::FlipMethod> &rotate,
                int shift_ticks, const std::string &output) {
-  try {
+  return run_and_report([&]() {
     maiconv::Ma2Tokenizer tokenizer;
     maiconv::Ma2Parser parser;
     maiconv::Ma2Composer ma2_composer;
@@ -133,18 +148,14 @@ int run_ma2_to(const std::filesystem::path &input, maiconv::ChartFormat format,
 
     write_or_stdout(output, file_name, result);
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_simai_to(const std::filesystem::path &input,
                  std::optional<int> difficulty, maiconv::ChartFormat format,
                  const std::optional<maiconv::FlipMethod> &rotate,
                  int shift_ticks, const std::string &output) {
-  try {
+  return run_and_report([&]() {
     const int diff = difficulty.value_or(1);
     maiconv::simai::Tokenizer tokenizer;
     maiconv::simai::Parser parser;
@@ -178,17 +189,13 @@ int run_simai_to(const std::filesystem::path &input,
 
     write_or_stdout(output, file_name, result);
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_media_audio_to_mp3(const std::filesystem::path &acb,
                            const std::filesystem::path &awb,
                            const std::string &output) {
-  try {
+  return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "track.mp3");
     if (!maiconv::convert_acb_awb_to_mp3(acb, awb, target)) {
       throw std::runtime_error("Audio conversion failed: " + acb.string() +
@@ -196,16 +203,12 @@ int run_media_audio_to_mp3(const std::filesystem::path &acb,
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_media_audio_file_to_mp3(const std::filesystem::path &input_audio,
                                 const std::string &output) {
-  try {
+  return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "track.mp3");
     if (!maiconv::convert_audio_to_mp3(input_audio, target)) {
       throw std::runtime_error("Audio conversion failed: " +
@@ -213,17 +216,13 @@ int run_media_audio_file_to_mp3(const std::filesystem::path &input_audio,
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_media_mp3_to_acb_awb(const std::filesystem::path &input_mp3,
                              const std::string &output_acb,
                              const std::string &output_awb) {
-  try {
+  return run_and_report([&]() {
     const auto target_acb = resolve_binary_output_path(output_acb, "track.acb");
     std::filesystem::path target_awb;
     if (output_awb.empty()) {
@@ -243,16 +242,12 @@ int run_media_mp3_to_acb_awb(const std::filesystem::path &input_mp3,
               << "  ACB: " << target_acb.string() << "\n"
               << "  AWB: " << target_awb.string() << "\n";
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_media_cover_to_png(const std::filesystem::path &input_ab,
                            const std::string &output) {
-  try {
+  return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "bg.png");
     if (!maiconv::convert_ab_to_png(input_ab, target)) {
       throw std::runtime_error("Cover conversion failed: " + input_ab.string() +
@@ -260,16 +255,12 @@ int run_media_cover_to_png(const std::filesystem::path &input_ab,
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_media_cover_to_ab(const std::filesystem::path &input_image,
                           const std::string &output) {
-  try {
+  return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "bg.ab");
     if (!target.parent_path().empty()) {
       std::filesystem::create_directories(target.parent_path());
@@ -283,16 +274,12 @@ int run_media_cover_to_ab(const std::filesystem::path &input_image,
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_media_video_to_mp4(const std::filesystem::path &input_video,
                            const std::string &output) {
-  try {
+  return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "pv.mp4");
     if (!maiconv::convert_dat_or_usm_to_mp4(input_video, target)) {
       throw std::runtime_error("Video conversion failed: " +
@@ -300,16 +287,12 @@ int run_media_video_to_mp4(const std::filesystem::path &input_video,
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 int run_media_video_to_dat(const std::filesystem::path &input_mp4,
                            const std::string &output) {
-  try {
+  return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "pv.dat");
     if (!maiconv::convert_mp4_to_dat(input_mp4, target)) {
       throw std::runtime_error(
@@ -318,11 +301,7 @@ int run_media_video_to_dat(const std::filesystem::path &input_mp4,
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
-  } catch (const std::exception &ex) {
-    std::cerr << "Program cannot proceed because of following error returned:\n"
-              << ex.what() << "\n";
-    return kFailure;
-  }
+  });
 }
 
 std::optional<maiconv::AssetsExportLayout>
