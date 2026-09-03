@@ -391,26 +391,35 @@ DelayBounds estimate_delay_bounds_like_mailib(const Chart &chart) {
   return bounds;
 }
 
-} // namespace
+struct OrderedToken {
+  std::string text;
+  int weight = 1;
+  int order_hint = 0;
+  int insertion_order = 0;
+};
 
-std::string simai::Compiler::compile_chart(const Chart &source) const {
-  Chart chart = source;
-  chart.normalize();
+struct SlotTokens {
+  std::vector<std::string> controls;
+  std::vector<OrderedToken> notes;
+};
 
-  const int def = chart.definition();
+// State machine that renders a chart's notes into per-tick simai token
+// slots, compacting connected slide chains into single tokens.
+class SlideChainBuilder {
+public:
+  explicit SlideChainBuilder(const Chart &chart)
+      : chart_(chart), def_(chart.definition()) {}
 
-  struct OrderedToken {
-    std::string text;
-    int weight = 1;
-    int order_hint = 0;
-    int insertion_order = 0;
-  };
+  // Runs the per-note render pass over chart.notes().
+  void build_note_tokens();
 
-  struct SlotTokens {
-    std::vector<std::string> controls;
-    std::vector<OrderedToken> notes;
-  };
+  // Returns tokens sorted by slot weight/order per tick.
+  std::map<int, SlotTokens> &tokens_at() { return tokens_at_; }
 
+  // Used by compile_chart for stable-sort phase + serialize + delay bounds.
+  const DelayBounds &delay_bounds() const { return delay_bounds_; }
+
+private:
   struct ChainRef {
     int origin_stamp = 0;
     int origin_key = -1;
@@ -437,201 +446,221 @@ std::string simai::Compiler::compile_chart(const Chart &source) const {
     std::size_t branch_index = 0;
   };
 
-  const auto find_matching_slide_start_state =
-      [&](const Note &slide) -> std::optional<SpecialState> {
-    const int stamp = slide.tick_stamp(def);
-    for (const auto &candidate : chart.notes()) {
-      if (candidate.type != NoteType::SlideStart) {
-        continue;
-      }
-      if (candidate.tick_stamp(def) != stamp || candidate.key != slide.key) {
-        continue;
-      }
-      return candidate.state;
-    }
-    return std::nullopt;
-  };
+  std::optional<SpecialState>
+  find_matching_slide_start_state(const Note &slide) const;
+  bool has_matching_slide(const Note &candidate) const;
+  std::string render_chain_branch(const ChainRef &ref) const;
+  std::string render_slide_bundle(const SlideBundle &bundle) const;
+  void erase_open_chain_entry(
+      std::map<std::pair<int, int>, std::vector<ChainHandle>> &table,
+      const std::pair<int, int> &key, const ChainHandle &handle);
+  void erase_open_chain(int stamp, const ChainHandle &handle);
+  void store_open_chain(int stamp, const ChainHandle &handle);
+  std::optional<ChainHandle> find_open_chain(const Note &note) const;
+  void emit_bpm_controls();
 
-  const auto has_matching_slide = [&](const Note &candidate) {
-    if (candidate.type != NoteType::SlideStart) {
-      return false;
-    }
-    const int stamp = candidate.tick_stamp(def);
-    return std::any_of(
-        chart.notes().begin(), chart.notes().end(), [&](const Note &note) {
-          return is_slide_type(note.type) && note.tick_stamp(def) == stamp &&
-                 note.key == candidate.key;
-        });
-  };
-
-  std::map<int, SlotTokens> tokens_at;
-  std::vector<SlideBundle> slide_bundles;
+  const Chart &chart_;
+  int def_;
+  std::map<int, SlotTokens> tokens_at_;
+  std::vector<SlideBundle> slide_bundles_;
   std::map<std::pair<int, int>, std::vector<ChainHandle>>
-      open_slide_chains_by_end;
-  std::map<std::pair<int, int>, std::size_t> simultaneous_slide_bundles;
-  std::map<std::pair<int, int>, int> slide_start_index_by_stamp_key;
-  int note_token_insertion_order = 0;
+      open_slide_chains_by_end_;
+  std::map<std::pair<int, int>, std::size_t> simultaneous_slide_bundles_;
+  std::map<std::pair<int, int>, int> slide_start_index_by_stamp_key_;
+  int note_token_insertion_order_ = 0;
+  DelayBounds delay_bounds_;
+};
 
-  for (std::size_t i = 0; i < chart.notes().size(); ++i) {
-    const auto &note = chart.notes()[i];
-    if (note.type != NoteType::SlideStart) {
+std::optional<SpecialState>
+SlideChainBuilder::find_matching_slide_start_state(const Note &slide) const {
+  const int stamp = slide.tick_stamp(def_);
+  for (const auto &candidate : chart_.notes()) {
+    if (candidate.type != NoteType::SlideStart) {
       continue;
     }
-    const auto key = std::make_pair(note.tick_stamp(def), note.key);
-    if (slide_start_index_by_stamp_key.find(key) ==
-        slide_start_index_by_stamp_key.end()) {
-      slide_start_index_by_stamp_key.emplace(key, static_cast<int>(i));
+    if (candidate.tick_stamp(def_) != stamp || candidate.key != slide.key) {
+      continue;
     }
+    return candidate.state;
+  }
+  return std::nullopt;
+}
+
+bool SlideChainBuilder::has_matching_slide(const Note &candidate) const {
+  if (candidate.type != NoteType::SlideStart) {
+    return false;
+  }
+  const int stamp = candidate.tick_stamp(def_);
+  return std::any_of(
+      chart_.notes().begin(), chart_.notes().end(), [&](const Note &note) {
+        return is_slide_type(note.type) && note.tick_stamp(def_) == stamp &&
+               note.key == candidate.key;
+      });
+}
+
+std::string SlideChainBuilder::render_chain_branch(const ChainRef &ref) const {
+  if (ref.has_continuation && ref.compact_enabled) {
+    Note compact_note;
+    compact_note.state =
+        ref.compact_has_break ? SpecialState::Break : SpecialState::Normal;
+    compact_note.wait_ticks = std::max(0, ref.compact_wait_ticks);
+    compact_note.last_ticks = std::max(0, ref.compact_last_ticks);
+    return ref.compact_path +
+           format_slide_duration(chart_, ref.origin_stamp, compact_note) +
+           state_suffix(compact_note.state);
+  }
+  return ref.expanded_body;
+}
+
+std::string
+SlideChainBuilder::render_slide_bundle(const SlideBundle &bundle) const {
+  std::string rendered = bundle.token_prefix;
+  for (std::size_t i = 0; i < bundle.branches.size(); ++i) {
+    if (i != 0) {
+      rendered += "*";
+    }
+    rendered += render_chain_branch(bundle.branches[i]);
+  }
+  return rendered;
+}
+
+void SlideChainBuilder::erase_open_chain_entry(
+    std::map<std::pair<int, int>, std::vector<ChainHandle>> &table,
+    const std::pair<int, int> &key, const ChainHandle &handle) {
+  const auto it = table.find(key);
+  if (it == table.end()) {
+    return;
+  }
+  auto &entries = it->second;
+  const auto entry_it = std::find_if(
+      entries.begin(), entries.end(), [&](const ChainHandle &candidate) {
+        return candidate.bundle_index == handle.bundle_index &&
+               candidate.branch_index == handle.branch_index;
+      });
+  if (entry_it != entries.end()) {
+    entries.erase(entry_it);
+  }
+  if (entries.empty()) {
+    table.erase(it);
+  }
+}
+
+void SlideChainBuilder::erase_open_chain(int stamp, const ChainHandle &handle) {
+  const auto &bundle = slide_bundles_[handle.bundle_index];
+  const auto &ref = bundle.branches[handle.branch_index];
+  erase_open_chain_entry(open_slide_chains_by_end_,
+                         {stamp, ref.current_end_key}, handle);
+}
+
+void SlideChainBuilder::store_open_chain(int stamp, const ChainHandle &handle) {
+  const auto &bundle = slide_bundles_[handle.bundle_index];
+  const auto &ref = bundle.branches[handle.branch_index];
+  open_slide_chains_by_end_[{stamp, ref.current_end_key}].push_back(handle);
+}
+
+std::optional<SlideChainBuilder::ChainHandle>
+SlideChainBuilder::find_open_chain(const Note &note) const {
+  const int stamp = note.tick_stamp(def_);
+
+  const auto by_end = open_slide_chains_by_end_.find({stamp, note.key});
+  if (by_end != open_slide_chains_by_end_.end() && !by_end->second.empty()) {
+    return by_end->second.front();
   }
 
-  const auto render_chain_branch = [&](const ChainRef &ref) -> std::string {
-    if (ref.has_continuation && ref.compact_enabled) {
-      Note compact_note;
-      compact_note.state =
-          ref.compact_has_break ? SpecialState::Break : SpecialState::Normal;
-      compact_note.wait_ticks = std::max(0, ref.compact_wait_ticks);
-      compact_note.last_ticks = std::max(0, ref.compact_last_ticks);
-      return ref.compact_path +
-             format_slide_duration(chart, ref.origin_stamp, compact_note) +
-             state_suffix(compact_note.state);
-    }
-    return ref.expanded_body;
-  };
-
-  const auto render_slide_bundle =
-      [&](const SlideBundle &bundle) -> std::string {
-    std::string rendered = bundle.token_prefix;
-    for (std::size_t i = 0; i < bundle.branches.size(); ++i) {
-      if (i != 0) {
-        rendered += "*";
-      }
-      rendered += render_chain_branch(bundle.branches[i]);
-    }
-    return rendered;
-  };
-
-  const auto erase_open_chain_entry = [&](auto &table,
-                                          const std::pair<int, int> &key,
-                                          const ChainHandle &handle) {
-    const auto it = table.find(key);
-    if (it == table.end()) {
-      return;
-    }
-    auto &entries = it->second;
-    const auto entry_it = std::find_if(
-        entries.begin(), entries.end(), [&](const ChainHandle &candidate) {
-          return candidate.bundle_index == handle.bundle_index &&
-                 candidate.branch_index == handle.branch_index;
-        });
-    if (entry_it != entries.end()) {
-      entries.erase(entry_it);
-    }
-    if (entries.empty()) {
-      table.erase(it);
-    }
-  };
-
-  const auto erase_open_chain = [&](int stamp, const ChainHandle &handle) {
-    const auto &bundle = slide_bundles[handle.bundle_index];
-    const auto &ref = bundle.branches[handle.branch_index];
-    erase_open_chain_entry(open_slide_chains_by_end,
-                           {stamp, ref.current_end_key}, handle);
-  };
-
-  const auto store_open_chain = [&](int stamp, const ChainHandle &handle) {
-    const auto &bundle = slide_bundles[handle.bundle_index];
-    const auto &ref = bundle.branches[handle.branch_index];
-    open_slide_chains_by_end[{stamp, ref.current_end_key}].push_back(handle);
-  };
-
-  const auto find_open_chain =
-      [&](const Note &note) -> std::optional<ChainHandle> {
-    const int stamp = note.tick_stamp(def);
-
-    const auto by_end = open_slide_chains_by_end.find({stamp, note.key});
-    if (by_end != open_slide_chains_by_end.end() && !by_end->second.empty()) {
-      return by_end->second.front();
-    }
-
-    if (note.state != SpecialState::ConnectingSlide) {
-      return std::nullopt;
-    }
-
-    const auto begin_stamp = open_slide_chains_by_end.lower_bound(
-        {stamp, std::numeric_limits<int>::min()});
-
-    std::optional<ChainHandle> preferred;
-    bool preferred_ambiguous = false;
-    for (auto it = begin_stamp;
-         it != open_slide_chains_by_end.end() && it->first.first == stamp;
-         ++it) {
-      for (const auto &handle : it->second) {
-        const auto &bundle = slide_bundles[handle.bundle_index];
-        const auto &ref = bundle.branches[handle.branch_index];
-        if (ref.origin_key != note.key) {
-          continue;
-        }
-        if (preferred.has_value()) {
-          preferred_ambiguous = true;
-          break;
-        }
-        preferred = handle;
-      }
-      if (preferred_ambiguous) {
-        break;
-      }
-    }
-    if (preferred.has_value() && !preferred_ambiguous) {
-      return preferred;
-    }
-
-    std::optional<ChainHandle> unique_any;
-    bool any_ambiguous = false;
-    for (auto it = begin_stamp;
-         it != open_slide_chains_by_end.end() && it->first.first == stamp;
-         ++it) {
-      for (const auto &handle : it->second) {
-        if (unique_any.has_value()) {
-          any_ambiguous = true;
-          break;
-        }
-        unique_any = handle;
-      }
-      if (any_ambiguous) {
-        break;
-      }
-    }
-    if (unique_any.has_value() && !any_ambiguous) {
-      return unique_any;
-    }
-
+  if (note.state != SpecialState::ConnectingSlide) {
     return std::nullopt;
-  };
+  }
 
-  const DelayBounds delay_bounds = estimate_delay_bounds_like_mailib(chart);
-  int max_note_bar = delay_bounds.max_bar;
-  int max_note_end_tick = delay_bounds.max_end_tick;
+  const auto begin_stamp = open_slide_chains_by_end_.lower_bound(
+      {stamp, std::numeric_limits<int>::min()});
 
-  for (const auto &bpm : chart.bpm_changes()) {
+  std::optional<ChainHandle> preferred;
+  bool preferred_ambiguous = false;
+  for (auto it = begin_stamp;
+       it != open_slide_chains_by_end_.end() && it->first.first == stamp;
+       ++it) {
+    for (const auto &handle : it->second) {
+      const auto &bundle = slide_bundles_[handle.bundle_index];
+      const auto &ref = bundle.branches[handle.branch_index];
+      if (ref.origin_key != note.key) {
+        continue;
+      }
+      if (preferred.has_value()) {
+        preferred_ambiguous = true;
+        break;
+      }
+      preferred = handle;
+    }
+    if (preferred_ambiguous) {
+      break;
+    }
+  }
+  if (preferred.has_value() && !preferred_ambiguous) {
+    return preferred;
+  }
+
+  std::optional<ChainHandle> unique_any;
+  bool any_ambiguous = false;
+  for (auto it = begin_stamp;
+       it != open_slide_chains_by_end_.end() && it->first.first == stamp;
+       ++it) {
+    for (const auto &handle : it->second) {
+      if (unique_any.has_value()) {
+        any_ambiguous = true;
+        break;
+      }
+      unique_any = handle;
+    }
+    if (any_ambiguous) {
+      break;
+    }
+  }
+  if (unique_any.has_value() && !any_ambiguous) {
+    return unique_any;
+  }
+
+  return std::nullopt;
+}
+
+void SlideChainBuilder::emit_bpm_controls() {
+  const int max_note_bar = delay_bounds_.max_bar;
+  for (const auto &bpm : chart_.bpm_changes()) {
     const std::string token = "(" + format_decimal_compact(bpm.bpm) + ")";
-    const int stamp = bpm.tick_stamp(def);
-    if (stamp / def > max_note_bar) {
+    const int stamp = bpm.tick_stamp(def_);
+    if (stamp / def_ > max_note_bar) {
       continue;
     }
-    auto &controls = tokens_at[stamp].controls;
+    auto &controls = tokens_at_[stamp].controls;
     if (controls.empty() || controls.back() != token) {
       controls.push_back(token);
     }
   }
+}
 
-  for (std::size_t note_index = 0; note_index < chart.notes().size();
+void SlideChainBuilder::build_note_tokens() {
+  delay_bounds_ = estimate_delay_bounds_like_mailib(chart_);
+  emit_bpm_controls();
+
+  for (std::size_t i = 0; i < chart_.notes().size(); ++i) {
+    const auto &note = chart_.notes()[i];
+    if (note.type != NoteType::SlideStart) {
+      continue;
+    }
+    const auto key = std::make_pair(note.tick_stamp(def_), note.key);
+    if (slide_start_index_by_stamp_key_.find(key) ==
+        slide_start_index_by_stamp_key_.end()) {
+      slide_start_index_by_stamp_key_.emplace(key, static_cast<int>(i));
+    }
+  }
+
+  for (std::size_t note_index = 0; note_index < chart_.notes().size();
        ++note_index) {
-    const auto &note = chart.notes()[note_index];
+    const auto &note = chart_.notes()[note_index];
     if (has_matching_slide(note)) {
       continue;
     }
 
-    const int ts = note.tick_stamp(def);
+    const int ts = note.tick_stamp(def_);
     int order_hint = static_cast<int>(note_index);
 
     std::string token;
@@ -669,19 +698,19 @@ std::string simai::Compiler::compile_chart(const Chart &source) const {
       } else {
         token = std::to_string(note.key + 1) + state;
       }
-      token += "h" + format_hold_duration(chart, ts, note);
+      token += "h" + format_hold_duration(chart_, ts, note);
     } else if (is_slide_type(note.type)) {
       const std::string start_state = state_suffix(slide_start_state);
       const std::string segment_state = state_suffix(note.state);
       const auto anchor_it =
-          slide_start_index_by_stamp_key.find({ts, note.key});
-      if (anchor_it != slide_start_index_by_stamp_key.end()) {
+          slide_start_index_by_stamp_key_.find({ts, note.key});
+      if (anchor_it != slide_start_index_by_stamp_key_.end()) {
         order_hint = std::min(order_hint, anchor_it->second);
       }
 
       const auto chain_handle = find_open_chain(note);
       const int display_start_key =
-          chain_handle.has_value() ? slide_bundles[chain_handle->bundle_index]
+          chain_handle.has_value() ? slide_bundles_[chain_handle->bundle_index]
                                          .branches[chain_handle->branch_index]
                                          .current_end_key
                                    : note.key;
@@ -690,21 +719,21 @@ std::string simai::Compiler::compile_chart(const Chart &source) const {
       const std::string segment_path =
           notation + std::to_string(note.end_key + 1);
       const std::string segment_duration =
-          format_slide_duration(chart, ts, note);
+          format_slide_duration(chart_, ts, note);
       const bool note_has_break = note.state == SpecialState::Break;
       const auto bundle_key = std::make_pair(ts, display_start_key);
 
       if (!chain_handle.has_value() &&
           note.state != SpecialState::ConnectingSlide) {
-        const auto bundle_it = simultaneous_slide_bundles.find(bundle_key);
-        if (bundle_it != simultaneous_slide_bundles.end()) {
-          auto &bundle = slide_bundles[bundle_it->second];
+        const auto bundle_it = simultaneous_slide_bundles_.find(bundle_key);
+        if (bundle_it != simultaneous_slide_bundles_.end()) {
+          auto &bundle = slide_bundles_[bundle_it->second];
           bundle.branches.push_back(ChainRef{
               ts, note.key, note.end_key,
               ts + note.wait_ticks + note.last_ticks, segment_path,
               segment_path + segment_state + segment_duration, note.wait_ticks,
               std::max(0, note.last_ticks), false, true, note_has_break});
-          auto &prior_notes = tokens_at[bundle.origin_stamp].notes;
+          auto &prior_notes = tokens_at_[bundle.origin_stamp].notes;
           prior_notes[bundle.note_index].text = render_slide_bundle(bundle);
           const ChainHandle handle{bundle_it->second,
                                    bundle.branches.size() - 1};
@@ -716,13 +745,13 @@ std::string simai::Compiler::compile_chart(const Chart &source) const {
       if (chain_handle.has_value() &&
           (note.state == SpecialState::ConnectingSlide ||
            note.state == SpecialState::Normal)) {
-        auto &bundle = slide_bundles[chain_handle->bundle_index];
+        auto &bundle = slide_bundles_[chain_handle->bundle_index];
         auto &ref = bundle.branches[chain_handle->branch_index];
         Note chained_note = note;
         chained_note.state = SpecialState::ConnectingSlide;
         ref.compact_path += segment_path;
         ref.expanded_body += "*" + segment_path + segment_state +
-                             format_slide_duration(chart, ts, chained_note);
+                             format_slide_duration(chart_, ts, chained_note);
         ref.compact_last_ticks += std::max(0, note.last_ticks);
         ref.has_continuation = true;
         ref.compact_has_break = ref.compact_has_break || note_has_break;
@@ -730,7 +759,7 @@ std::string simai::Compiler::compile_chart(const Chart &source) const {
         const bool continuation_compactable = note.wait_ticks == 0;
         ref.compact_enabled = ref.compact_enabled && continuation_compactable;
 
-        auto &prior_notes = tokens_at[bundle.origin_stamp].notes;
+        auto &prior_notes = tokens_at_[bundle.origin_stamp].notes;
         prior_notes[bundle.note_index].text = render_slide_bundle(bundle);
 
         erase_open_chain(ts, *chain_handle);
@@ -757,21 +786,37 @@ std::string simai::Compiler::compile_chart(const Chart &source) const {
     }
 
     if (!token.empty()) {
-      auto &notes = tokens_at[ts].notes;
+      auto &notes = tokens_at_[ts].notes;
       notes.push_back(OrderedToken{token, slot_token_weight(token), order_hint,
-                                   note_token_insertion_order++});
+                                   note_token_insertion_order_++});
       if (is_slide_type(note.type) && created_slide_bundle.has_value() &&
           created_bundle_key.has_value()) {
         SlideBundle bundle = *created_slide_bundle;
         bundle.note_index = notes.size() - 1;
-        const std::size_t bundle_index = slide_bundles.size();
-        slide_bundles.push_back(std::move(bundle));
-        simultaneous_slide_bundles[*created_bundle_key] = bundle_index;
+        const std::size_t bundle_index = slide_bundles_.size();
+        slide_bundles_.push_back(std::move(bundle));
+        simultaneous_slide_bundles_[*created_bundle_key] = bundle_index;
         const ChainHandle handle{bundle_index, 0};
         store_open_chain(ts + note.wait_ticks + note.last_ticks, handle);
       }
     }
   }
+}
+
+} // namespace
+
+std::string simai::Compiler::compile_chart(const Chart &source) const {
+  Chart chart = source;
+  chart.normalize();
+
+  SlideChainBuilder builder(chart);
+  builder.build_note_tokens();
+
+  auto &tokens_at = builder.tokens_at();
+  const DelayBounds &delay_bounds = builder.delay_bounds();
+  const int def = chart.definition();
+  const int max_note_bar = delay_bounds.max_bar;
+  const int max_note_end_tick = delay_bounds.max_end_tick;
 
   for (auto &[stamp, slot] : tokens_at) {
     (void)stamp;
