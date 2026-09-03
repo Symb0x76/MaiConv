@@ -264,6 +264,7 @@ if(MAICONV_BUILD_TESTS)
         tests/unit/test_chart.cpp
         tests/unit/test_ma2.cpp
         tests/unit/test_media.cpp
+        tests/unit/test_media_shared.cpp
         tests/unit/test_simai.cpp
         tests/unit/test_assets.cpp
         tests/unit/test_zip.cpp
