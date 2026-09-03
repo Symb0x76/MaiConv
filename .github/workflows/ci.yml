@@ -127,3 +127,25 @@ jobs:
         ./build/default/MaiConv media video --gpu --help > /dev/null
         ./build/default/MaiConv media audio --gpu --help > /dev/null
         ./build/default/MaiConv assets --gpu --help > /dev/null
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install clang-format
+      run: |
+        python3 -m pip install --quiet "clang-format==22.1.8"
+
+    - name: Check first-party sources are clang-format clean
+      run: |
+        files=$(git ls-files 'src/*.cpp' 'src/*.hpp' 'include/maiconv/*.hpp' \
+          'include/maiconv/core/*.hpp' 'include/maiconv/core/simai/*.hpp' \
+          'include/maiconv/core/media/*.hpp' 'tests/*.cpp' \
+          'src/core/*.cpp' 'src/cli/*.cpp' 'src/core/simai_*.cpp' \
+          | grep -vE '^(src/uabe/|include/uabe/|src/lz4/)' || true)
+        if [ -n "$files" ]; then
+          clang-format --dry-run --Werror $files
+        fi
