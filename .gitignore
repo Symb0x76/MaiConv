@@ -8,6 +8,9 @@ build/
 # Claude Code
 .claude/
 
+# CodeGraph local index
+.codegraph/
+
 # Test assets
 StreamingAssets/
 
