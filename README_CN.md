@@ -12,7 +12,7 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 ## 特性
 
-- C++20 + CMake + git submodule（运行时依赖在 third_party）
+- C++23 + CMake + git submodule（运行时依赖在 third_party）
 - CLI 子命令：
   - `maiconv ma2`
   - `maiconv simai`

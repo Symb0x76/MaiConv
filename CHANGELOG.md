@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased - Structural Refactor & C++23
+
+### Changed
+
+- core: deleted dead `media_backend.cpp`; moved shared media implementations into `media_shared.cpp` and removed the three-layer forwarding chain (`media_shared_*` → `media_video_shared_*` → anonymous namespace).
+- core: split `assets.cpp` by cohesion into `assets_filter.cpp` (version/filter logic) and `assets_parse.cpp` (Music.xml parsing + asset index), sharing types through `assets_internal.hpp`.
+- core: extracted the slide-chain state machine from `compile_chart` into a `SlideChainBuilder` class; `compile_chart` is now a thin orchestrator.
+- core: consolidated duplicated string/file helpers (`to_int`, `to_double`, `file_non_empty`, `trim`) into `io.hpp`.
+- cli: centralized per-command error handling in `run_and_report`.
+- build: raised the project standard to C++23; added `.clang-format` (LLVM) and a CI format check.
+- assets: replaced dual hand-maintained version maps with a single `constexpr` version catalog.
+- media: removed an obsolete global decode mutex that throttled parallel `.ab` cover exports.
+
+### Added
+
+- assets: implemented `--zip` export (STORE-method zip writer) with unit tests.
+- tests: broadened chart and ma2 coverage; added deterministic unit tests for media byte-order readers and mp3/file probing.
+
 ## v0.0.5 - Utage Handling & Simai Rendering Improvements
 
 ### Added

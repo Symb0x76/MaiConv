@@ -11,7 +11,7 @@ Cross-platform C++ reimplementation and enhancement of [MaichartConverter](https
 - [x] Separate 1P/2P Utage charts and append `(L)/(R)` to output folder names and `maidata` `&title=`
 ## Features
 
-- C++20 + CMake + git submodule (runtime deps in third_party)
+- C++23 + CMake + git submodule (runtime deps in third_party)
 - CLI subcommands:
   - `maiconv ma2`
   - `maiconv simai`
