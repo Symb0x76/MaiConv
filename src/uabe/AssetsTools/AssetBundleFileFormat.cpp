@@ -10,6 +10,7 @@
 #include <assert.h>
 #include <condition_variable>
 #include <future>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 

@@ -27,6 +27,10 @@ OLD_IFS=${IFS}
 IFS=''
 for f in ${STAGED_FILES}; do
     case "${f}" in
+        src/uabe/*|include/uabe/*|src/lz4/*)
+            # Vendored trees keep their upstream formatting; never clang-format.
+            continue
+            ;;
         src/*|include/*|tests/*)
             case "${f}" in
                 *.c|*.cc|*.cpp|*.cxx|*.h|*.hh|*.hpp|*.hxx)
