@@ -1474,7 +1474,8 @@ TrackProcessResult process_track_folder(
       result.final_track_output = final_track_output;
       result.incomplete = true;
       result.emit_track_output = true;
-      result.fatal_error = "Incomplete assets found. Use --ignore to continue.";
+      result.fatal_error = "Incomplete assets found for " + info.id + " " +
+                           info.name + ". Use --ignore to continue.";
       return result;
     }
 
@@ -1501,10 +1502,11 @@ TrackProcessResult process_track_folder(
     result.emit_track_output = true;
     return result;
   } catch (const std::exception &ex) {
-    result.fatal_error = ex.what();
+    result.fatal_error = path_to_utf8(folder.filename()) + ": " + ex.what();
     return result;
   } catch (...) {
-    result.fatal_error = "Unknown error while processing track";
+    result.fatal_error = path_to_utf8(folder.filename()) +
+                         ": unknown error while processing track";
     return result;
   }
 }
@@ -1764,7 +1766,8 @@ int run_compile_assets(const AssetsOptions &options) {
             cover_bases, video_bases, music_indexes, cover_indexes,
             video_indexes, output_path_mutex_pool);
         emit_track_progress_immediately(results[i]);
-        if (results[i].fatal_error.has_value()) {
+        if (results[i].fatal_error.has_value() &&
+            !options.ignore_incomplete_assets) {
           break;
         }
       }
@@ -1794,7 +1797,8 @@ int run_compile_assets(const AssetsOptions &options) {
                 music_indexes, cover_indexes, video_indexes,
                 output_path_mutex_pool);
             emit_track_progress_immediately(results[index]);
-            if (results[index].fatal_error.has_value()) {
+            if (results[index].fatal_error.has_value() &&
+                !options.ignore_incomplete_assets) {
               stop_processing.store(true, std::memory_order_relaxed);
             }
           }
@@ -1830,7 +1834,7 @@ int run_compile_assets(const AssetsOptions &options) {
       last_warning_flush = now;
     };
 
-    std::optional<std::string> first_fatal_error;
+    std::vector<std::string> fatal_errors;
     for (const auto &result : results) {
       timing.merge(result.timing);
       matched_music_id = matched_music_id || result.matched_music_id;
@@ -1845,9 +1849,7 @@ int run_compile_assets(const AssetsOptions &options) {
       }
 
       if (result.fatal_error.has_value()) {
-        if (!first_fatal_error.has_value()) {
-          first_fatal_error = result.fatal_error;
-        }
+        fatal_errors.push_back(*result.fatal_error);
         continue;
       }
 
@@ -1871,8 +1873,8 @@ int run_compile_assets(const AssetsOptions &options) {
     }
     flush_verbose_warnings(true);
 
-    if (first_fatal_error.has_value()) {
-      throw std::runtime_error(*first_fatal_error);
+    if (!fatal_errors.empty() && !options.ignore_incomplete_assets) {
+      throw std::runtime_error(fatal_errors.front());
     }
 
     if (target_music_filters.active() && !matched_music_id) {
@@ -1897,6 +1899,17 @@ int run_compile_assets(const AssetsOptions &options) {
     }
     if (timing_enabled) {
       emit_timing_summary(timing);
+    }
+
+    if (!fatal_errors.empty()) {
+      // Reachable only with --ignore, which lets the batch run to completion.
+      // Report every track that failed and fail the command, without discarding
+      // the tracks that succeeded.
+      std::cerr << "Failed tracks (" << fatal_errors.size() << "):\n";
+      for (const auto &failure : fatal_errors) {
+        std::cerr << "  " << failure << "\n";
+      }
+      return kFailure;
     }
 
     return kSuccess;

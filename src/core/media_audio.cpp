@@ -6,7 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <fstream>
+#include <stdexcept>
 
 namespace maiconv {
 
@@ -112,85 +112,19 @@ bool convert_acb_awb_to_mp3(const std::filesystem::path &acb,
   return false;
 }
 
+// Not implemented. The previous implementation copied the MP3 verbatim to the
+// .awb and wrote a 32-byte MaiConv-private stub as the .acb. That pair round
+// -tripped only through MaiConv's own reader (read_acb_stub_sidecar_awb_name)
+// and could not be loaded by the game, so reporting success was misleading.
+// Throwing keeps this distinguishable from a genuine conversion failure, which
+// a false return would not. See TODO.md Milestone C.
 bool convert_mp3_to_acb_awb(const std::filesystem::path &source_mp3,
-                            const std::filesystem::path &target_acb,
-                            const std::filesystem::path &target_awb) {
-  if (!media_shared_file_non_empty(source_mp3)) {
-    return false;
-  }
-
-  if (media_shared_lower(source_mp3.extension().string()) != ".mp3") {
-    return false;
-  }
-
-  if (!target_awb.parent_path().empty()) {
-    std::filesystem::create_directories(target_awb.parent_path());
-  }
-  if (!target_acb.parent_path().empty()) {
-    std::filesystem::create_directories(target_acb.parent_path());
-  }
-
-  std::error_code ec;
-  std::filesystem::copy_file(source_mp3, target_awb,
-                             std::filesystem::copy_options::overwrite_existing,
-                             ec);
-  if (ec || !media_shared_file_non_empty(target_awb)) {
-    return false;
-  }
-
-  const auto awb_name = target_awb.filename().string();
-  const auto awb_size = std::filesystem::file_size(target_awb, ec);
-  if (ec) {
-    return false;
-  }
-
-  constexpr std::array<uint8_t, 16> kAcbStubMagic = {
-      static_cast<uint8_t>('M'), static_cast<uint8_t>('A'),
-      static_cast<uint8_t>('I'), static_cast<uint8_t>('C'),
-      static_cast<uint8_t>('O'), static_cast<uint8_t>('N'),
-      static_cast<uint8_t>('V'), static_cast<uint8_t>('_'),
-      static_cast<uint8_t>('A'), static_cast<uint8_t>('C'),
-      static_cast<uint8_t>('B'), static_cast<uint8_t>('_'),
-      static_cast<uint8_t>('S'), static_cast<uint8_t>('T'),
-      static_cast<uint8_t>('U'), static_cast<uint8_t>('B')};
-
-  auto write_u32_le = [](std::ofstream &out, uint32_t value) {
-    const std::array<uint8_t, 4> bytes = {
-        static_cast<uint8_t>(value & 0xFFU),
-        static_cast<uint8_t>((value >> 8U) & 0xFFU),
-        static_cast<uint8_t>((value >> 16U) & 0xFFU),
-        static_cast<uint8_t>((value >> 24U) & 0xFFU)};
-    out.write(reinterpret_cast<const char *>(bytes.data()),
-              static_cast<std::streamsize>(bytes.size()));
-  };
-
-  auto write_u64_le = [](std::ofstream &out, uint64_t value) {
-    const std::array<uint8_t, 8> bytes = {
-        static_cast<uint8_t>(value & 0xFFU),
-        static_cast<uint8_t>((value >> 8U) & 0xFFU),
-        static_cast<uint8_t>((value >> 16U) & 0xFFU),
-        static_cast<uint8_t>((value >> 24U) & 0xFFU),
-        static_cast<uint8_t>((value >> 32U) & 0xFFU),
-        static_cast<uint8_t>((value >> 40U) & 0xFFU),
-        static_cast<uint8_t>((value >> 48U) & 0xFFU),
-        static_cast<uint8_t>((value >> 56U) & 0xFFU)};
-    out.write(reinterpret_cast<const char *>(bytes.data()),
-              static_cast<std::streamsize>(bytes.size()));
-  };
-
-  std::ofstream out(target_acb, std::ios::binary | std::ios::trunc);
-  if (!out) {
-    return false;
-  }
-  out.write(reinterpret_cast<const char *>(kAcbStubMagic.data()),
-            static_cast<std::streamsize>(kAcbStubMagic.size()));
-  write_u32_le(out, 1U);
-  write_u64_le(out, static_cast<uint64_t>(awb_size));
-  write_u32_le(out, static_cast<uint32_t>(awb_name.size()));
-  out.write(awb_name.data(), static_cast<std::streamsize>(awb_name.size()));
-  out.flush();
-
-  return out.good() && media_shared_file_non_empty(target_acb);
+                            const std::filesystem::path & /*target_acb*/,
+                            const std::filesystem::path & /*target_awb*/) {
+  throw std::runtime_error(
+      "mp3->acb+awb conversion is not implemented: " + source_mp3.string() +
+      "\nThe previous implementation produced a byte-copied .awb and a stub "
+      ".acb that only MaiConv could read. See TODO.md Milestone C.");
 }
 
 bool generate_silent_mp3(const std::filesystem::path &target_mp3,

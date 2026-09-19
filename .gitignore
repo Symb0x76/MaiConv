@@ -11,6 +11,9 @@ build/
 # CodeGraph local index
 .codegraph/
 
+# Docs
+docs/
+
 # Test assets
 StreamingAssets/
 

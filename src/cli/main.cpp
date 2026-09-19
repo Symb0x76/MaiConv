@@ -259,21 +259,13 @@ int run_media_cover_to_png(const std::filesystem::path &input_ab,
 }
 
 int run_media_cover_to_ab(const std::filesystem::path &input_image,
-                          const std::string &output) {
-  return run_and_report([&]() {
-    const auto target = resolve_binary_output_path(output, "bg.ab");
-    if (!target.parent_path().empty()) {
-      std::filesystem::create_directories(target.parent_path());
-    }
-    std::filesystem::copy_file(
-        input_image, target, std::filesystem::copy_options::overwrite_existing);
-    if (!std::filesystem::exists(target) ||
-        std::filesystem::file_size(target) == 0) {
-      throw std::runtime_error("Cover conversion failed: " +
-                               input_image.string() + " -> " + target.string());
-    }
-    std::cout << "Successfully converted at: " << target.string() << "\n";
-    return kSuccess;
+                          const std::string & /*output*/) {
+  return run_and_report([&]() -> int {
+    throw std::runtime_error(
+        "png->ab conversion is not implemented: " + input_image.string() +
+        "\nThe previous implementation copied the source image verbatim into a "
+        "file named .ab. Such a file is readable only by MaiConv itself and "
+        "cannot be loaded by the game. See TODO.md Milestone C.");
   });
 }
 

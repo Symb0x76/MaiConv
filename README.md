@@ -7,7 +7,7 @@ Cross-platform C++ reimplementation and enhancement of [MaichartConverter](https
 ## TODO
 
 - [ ] Implement local lz4 decompression in replacement of Unity LZ4 library (currently used via UABE code paths and is not performance-critical)
-- [ ] Add reverse asset export in `assets` workflow (currently available in `maiconv media`: `png->ab`, `mp3->acb+awb`, `mp4->dat`)
+- [ ] Add reverse asset export in `assets` workflow (of the three reverse conversions only `mp4->dat` is implemented; `png->ab` and `mp3->acb+awb` are not implemented and exit with an error — see TODO.md Milestone C)
 - [x] Separate 1P/2P Utage charts and append `(L)/(R)` to output folder names and `maidata` `&title=`
 ## Features
 
@@ -197,18 +197,17 @@ Convert ACB+AWB to MP3:
 maiconv media audio --acb /path/to/music001944.acb --awb /path/to/music001944.awb --output ./track.mp3
 ```
 
-Pack MP3 into ACB+AWB:
+Pack MP3 into ACB+AWB: **not implemented.** The command exits with an error.
+See TODO.md Milestone C.
 
-```bash
-maiconv media audio --input /path/to/track.mp3 --output-acb ./track.acb --output-awb ./track.awb
-```
-
-Convert jacket between AB and image files:
+Convert jacket AB to PNG:
 
 ```bash
 maiconv media cover --input /path/to/UI_Jacket_001944.ab --output ./bg.png
-maiconv media cover --input /path/to/bg.png --output ./bg.ab
 ```
+
+The reverse direction (`png->ab`) is **not implemented** and exits with an
+error. See TODO.md Milestone C.
 
 Convert DAT/USM/CRID to MP4:
 

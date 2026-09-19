@@ -935,8 +935,10 @@ TEST_CASE("assets logs incomplete progress before failing without --ignore") {
                      "maidata.txt"));
   REQUIRE_FALSE(
       fs::exists(output_root / "012341_RawMediaSongFail [DX]" / "maidata.txt"));
-  REQUIRE(captured_err.str().find("Incomplete assets found. Use --ignore to "
-                                  "continue.") != std::string::npos);
+  REQUIRE(captured_err.str().find("Incomplete assets found for 012341") !=
+          std::string::npos);
+  REQUIRE(captured_err.str().find("Use --ignore to continue.") !=
+          std::string::npos);
 
   fs::remove_all(temp_root);
 }
@@ -981,8 +983,10 @@ TEST_CASE(
       fs::exists(output_root / "012341_RawMediaSongFail [DX]" / "maidata.txt"));
   REQUIRE_FALSE(
       fs::exists(output_root / "012342_ShouldNotProcess [DX]" / "maidata.txt"));
-  REQUIRE(captured_err.str().find("Incomplete assets found. Use --ignore to "
-                                  "continue.") != std::string::npos);
+  REQUIRE(captured_err.str().find("Incomplete assets found for 012341") !=
+          std::string::npos);
+  REQUIRE(captured_err.str().find("Use --ignore to continue.") !=
+          std::string::npos);
 
   fs::remove_all(temp_root);
 }
@@ -1156,6 +1160,58 @@ TEST_CASE(
                            "012340_JacketDecodeFallbackSong [DX]_Incomplete"));
 
   fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets --ignore continues past a throwing track and still fails") {
+  // Covers both the sequential loop and the worker pool: each abandons the
+  // remaining queue on a fatal error unless --ignore is set.
+  for (const int jobs : {1, 2}) {
+    const fs::path temp_root = unique_temp_dir(
+        "assets_ignore_fatal_continue_jobs" + std::to_string(jobs));
+    const fs::path assets_root = temp_root / "StreamingAssets";
+    const fs::path output_root = temp_root / "output";
+
+    fs::create_directories(assets_root);
+    create_track(assets_root / "A020", "000444", "BlockedTrack", "POPS",
+                 "PRISM", {2, 3});
+    create_track(assets_root / "A021", "000555", "GoodTrack", "ANIME", "PRISM",
+                 {3, 4});
+
+    // Occupy one track's output directory path with a regular file so that
+    // create_directories throws, standing in for a disk-full or permission
+    // error. This is a genuine exception, not the "incomplete assets" path.
+    // Both the title folder and the id-only folder must be blocked, because
+    // export falls back to the latter when the former cannot be created.
+    fs::create_directories(output_root);
+    write_text_file(output_root / "000444_BlockedTrack", "blocker");
+    write_text_file(output_root / "000444", "blocker");
+
+    AssetsOptions options;
+    options.streaming_assets_path = assets_root;
+    options.output_path = output_root;
+    options.format = ChartFormat::Simai;
+    options.jobs = jobs;
+    options.ignore_incomplete_assets = true;
+
+    std::ostringstream captured_out;
+    std::ostringstream captured_err;
+    auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+    auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+    const int result = run_compile_assets(options);
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+
+    // The command still fails, and names the track that failed.
+    REQUIRE(result == 2);
+    const std::string err = captured_err.str();
+    REQUIRE(err.find("Failed tracks (1):") != std::string::npos);
+    REQUIRE(err.find("music000444") != std::string::npos);
+
+    // The healthy track is still exported rather than lost to the failure.
+    REQUIRE(fs::exists(output_root / "000555_GoodTrack" / "maidata.txt"));
+
+    fs::remove_all(temp_root);
+  }
 }
 
 TEST_CASE("assets marks CRID video conversion failure as incomplete") {

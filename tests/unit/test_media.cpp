@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -367,9 +368,9 @@ TEST_CASE("media copy mp3 without transcoder") {
   fs::remove_all(temp_root, ec);
 }
 
-TEST_CASE("media can package mp3 to acb+awb and roundtrip back to mp3") {
+TEST_CASE("media mp3->acb+awb is not implemented and fails loudly") {
   const fs::path temp_root =
-      fs::temp_directory_path() / "maiconv_media_mp3_acb_awb_roundtrip";
+      fs::temp_directory_path() / "maiconv_media_mp3_acb_awb_unimplemented";
   std::error_code ec;
   fs::remove_all(temp_root, ec);
   fs::create_directories(temp_root, ec);
@@ -377,7 +378,6 @@ TEST_CASE("media can package mp3 to acb+awb and roundtrip back to mp3") {
   const fs::path src_mp3 = temp_root / "input.mp3";
   const fs::path out_acb = temp_root / "track.acb";
   const fs::path out_awb = temp_root / "track.awb";
-  const fs::path out_mp3 = temp_root / "output.mp3";
 
   {
     std::ofstream out(src_mp3, std::ios::binary | std::ios::trunc);
@@ -402,14 +402,14 @@ TEST_CASE("media can package mp3 to acb+awb and roundtrip back to mp3") {
               static_cast<std::streamsize>(fake_mp3.size()));
   }
 
-  REQUIRE(maiconv::convert_mp3_to_acb_awb(src_mp3, out_acb, out_awb));
-  REQUIRE(fs::exists(out_acb));
-  REQUIRE(fs::exists(out_awb));
-  REQUIRE(fs::file_size(out_awb) == fs::file_size(src_mp3));
+  // Valid MP3 input: the throw must come from the conversion being
+  // unimplemented, not from input validation.
+  REQUIRE_THROWS_AS(maiconv::convert_mp3_to_acb_awb(src_mp3, out_acb, out_awb),
+                    std::runtime_error);
 
-  REQUIRE(maiconv::convert_acb_awb_to_mp3(out_acb, out_awb, out_mp3));
-  REQUIRE(fs::exists(out_mp3));
-  REQUIRE(fs::file_size(out_mp3) == fs::file_size(src_mp3));
+  // A conversion that cannot succeed must not leave partial artifacts behind.
+  REQUIRE_FALSE(fs::exists(out_acb));
+  REQUIRE_FALSE(fs::exists(out_awb));
 
   fs::remove_all(temp_root, ec);
 }

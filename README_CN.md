@@ -6,7 +6,7 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 ## 待办
 
-- [ ] 在 `assets` 流程中补齐反向资产导出（目前 `maiconv media` 已支持：`png->ab`、`mp3->acb+awb`、`mp4->dat`）
+- [ ] 在 `assets` 流程中补齐反向资产导出（三项反向转换中仅 `mp4->dat` 已实现；`png->ab` 与 `mp3->acb+awb` 尚未实现，执行会直接报错退出，详见 TODO.md Milestone C）
 - [ ] 实现本地lz4取代对UABE的依赖以提升跨平台性能
 - [x] 宴谱分离 1P/2P 并在输出目录名与 `maidata` 的 `&title=` 追加 `(L)/(R)`
 
@@ -205,18 +205,15 @@ ACB+AWB 转 MP3：
 maiconv media audio --acb /path/to/music114514.acb --awb /path/to/music114514.awb --output ./track.mp3
 ```
 
-MP3 打包为 ACB+AWB：
+MP3 打包为 ACB+AWB：**尚未实现**，执行会直接报错退出。详见 TODO.md Milestone C。
 
-```bash
-maiconv media audio --input /path/to/track.mp3 --output-acb ./track.acb --output-awb ./track.awb
-```
-
-AB 与图片互转：
+AB 转图片：
 
 ```bash
 maiconv media cover --input /path/to/UI_Jacket_114514.ab --output ./bg.png
-maiconv media cover --input /path/to/bg.png --output ./bg.ab
 ```
+
+反向的 `png->ab` **尚未实现**，执行会直接报错退出。详见 TODO.md Milestone C。
 
 DAT/USM/CRID 转 MP4：
 
