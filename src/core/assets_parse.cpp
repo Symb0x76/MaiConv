@@ -396,6 +396,48 @@ asset_index_cache_path(const std::filesystem::path &cache_root,
   return cache_root / ("asset_index_" + std::to_string(hash) + ".txt");
 }
 
+// Signature over the immediate subdirectories of `base`: their names and
+// modification times, hashed so the cache header stays a fixed size.
+//
+// The index is built recursively, but validating the whole tree would require
+// exactly the walk the cache exists to avoid. Stat-ing one level catches the
+// realistic update -- assets dropped into or removed from
+// AssetBundleImages/jacket, SoundData and friends -- at the cost of one stat
+// per subdirectory. Changes nested deeper, and edits that leave every
+// directory mtime untouched, still need --refresh-index.
+std::string asset_index_subdir_signature(const std::filesystem::path &base) {
+  std::vector<std::string> parts;
+  std::error_code iter_ec;
+  for (const auto &entry : std::filesystem::directory_iterator(base, iter_ec)) {
+    std::error_code kind_ec;
+    if (!entry.is_directory(kind_ec) || kind_ec) {
+      continue;
+    }
+    std::error_code time_ec;
+    const auto mtime = std::filesystem::last_write_time(entry.path(), time_ec);
+    if (time_ec) {
+      continue;
+    }
+    parts.push_back(lower(path_to_generic_utf8(entry.path().filename())) + ":" +
+                    std::to_string(file_time_to_ticks(mtime)));
+  }
+  if (iter_ec) {
+    return "unavailable";
+  }
+  std::sort(parts.begin(), parts.end());
+
+  std::uint64_t hash = 1469598103934665603ULL; // FNV-1a offset basis
+  for (const auto &part : parts) {
+    for (const unsigned char ch : part) {
+      hash ^= static_cast<std::uint64_t>(ch);
+      hash *= 1099511628211ULL;
+    }
+    hash ^= static_cast<std::uint64_t>('\n');
+    hash *= 1099511628211ULL;
+  }
+  return std::to_string(parts.size()) + "-" + std::to_string(hash);
+}
+
 bool load_asset_index_cache(const std::filesystem::path &cache_file,
                             const std::filesystem::path &base,
                             AssetIndex &index) {
@@ -410,10 +452,10 @@ bool load_asset_index_cache(const std::filesystem::path &cache_file,
   } catch (...) {
     return false;
   }
-  if (lines.size() < 3) {
+  if (lines.size() < 4) {
     return false;
   }
-  if (lines[0] != "MAICONV_ASSET_INDEX_V1") {
+  if (lines[0] != "MAICONV_ASSET_INDEX_V2") {
     return false;
   }
   if (lines[1] != asset_index_cache_key(base)) {
@@ -437,9 +479,15 @@ bool load_asset_index_cache(const std::filesystem::path &cache_file,
     return false;
   }
 
+  // The base directory's own mtime does not change when a file is added to one
+  // of its subdirectories, so that check alone let new assets stay invisible.
+  if (lines[3] != asset_index_subdir_signature(base)) {
+    return false;
+  }
+
   index.clear();
-  index.reserve(lines.size() > 3 ? lines.size() - 3 : 0);
-  for (std::size_t i = 3; i < lines.size(); ++i) {
+  index.reserve(lines.size() > 4 ? lines.size() - 4 : 0);
+  for (std::size_t i = 4; i < lines.size(); ++i) {
     if (lines[i].empty()) {
       continue;
     }
@@ -461,10 +509,12 @@ void write_asset_index_cache(const std::filesystem::path &cache_file,
 
   std::string out;
   out.reserve(index.size() * 40 + 128);
-  out += "MAICONV_ASSET_INDEX_V1\n";
+  out += "MAICONV_ASSET_INDEX_V2\n";
   out += asset_index_cache_key(base);
   out.push_back('\n');
   out += std::to_string(file_time_to_ticks(base_mtime));
+  out.push_back('\n');
+  out += asset_index_subdir_signature(base);
   out.push_back('\n');
   for (const auto &[_, absolute] : index) {
     (void)_;
@@ -668,7 +718,8 @@ detect_asset_bases(const std::vector<std::filesystem::path> &source_roots,
 std::vector<AssetIndex>
 build_asset_indexes_cached(const std::vector<std::filesystem::path> &bases,
                            const std::filesystem::path &cache_root,
-                           std::size_t *cache_hits, std::size_t *cache_misses) {
+                           std::size_t *cache_hits, std::size_t *cache_misses,
+                           bool refresh) {
   if (cache_hits != nullptr) {
     *cache_hits = 0;
   }
@@ -689,7 +740,10 @@ build_asset_indexes_cached(const std::vector<std::filesystem::path> &bases,
     }
 
     const auto cache_file = asset_index_cache_path(cache_root, base);
-    if (load_asset_index_cache(cache_file, base, index)) {
+    // --refresh-index forces a rebuild for the changes the subdirectory
+    // signature cannot see: assets nested deeper than one level, and files
+    // edited in place without moving any directory's mtime.
+    if (!refresh && load_asset_index_cache(cache_file, base, index)) {
       if (cache_hits != nullptr) {
         ++(*cache_hits);
       }

@@ -458,6 +458,7 @@ int main(int argc, char **argv) {
   std::string assets_rotate_str;
   int assets_shift = 0;
   bool assets_display = false;
+  bool assets_refresh_index = false;
   bool assets_ignore = false;
   bool assets_dummy = false;
   bool assets_resume = false;
@@ -511,6 +512,9 @@ int main(int argc, char **argv) {
                          "Counterclockwise90|Counterclockwise180|LeftToRight");
   assets_cmd->add_option("--shift", assets_shift, "Shift by ticks")
       ->capture_default_str();
+  assets_cmd->add_flag(
+      "--refresh-index", assets_refresh_index,
+      "Rebuild the asset index instead of reusing the cached one");
   assets_cmd->add_flag("--ignore", assets_ignore, "Ignore incomplete assets");
   assets_cmd->add_flag(
       "--dummy", assets_dummy,
@@ -600,6 +604,7 @@ int main(int argc, char **argv) {
                                      : maiconv::MaidataLevelMode::Constant;
     options.rotate = rotate;
     options.shift_ticks = assets_shift;
+    options.refresh_asset_index = assets_refresh_index;
     options.ignore_incomplete_assets = assets_ignore;
     options.dummy_assets = assets_dummy;
     options.skip_existing_exports = assets_resume;

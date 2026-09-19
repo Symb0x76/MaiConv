@@ -13,6 +13,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 #if defined(_WIN32)
 #include <process.h>
@@ -810,6 +811,70 @@ TEST_CASE("assets index cache is reused on repeated runs") {
   std::cerr.rdbuf(old_second_err);
   REQUIRE(second_result == 0);
   REQUIRE(second_err.str().find("asset_index_cache: hits=3, misses=0") !=
+          std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets index cache notices files added inside a subdirectory") {
+  const fs::path temp_root = unique_temp_dir("assets_index_cache_subdir");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A033", "000558", "SubdirCacheSong", "POPS",
+               "PRISM");
+  create_media_assets(assets_root / "A033", "000558");
+
+  // The subdirectory must already exist before the cache is written. Creating
+  // a NEW directory would bump SoundData's own mtime, which the cache already
+  // checked; the case that used to slip through is a file appearing inside an
+  // existing subdirectory, which moves only that subdirectory's mtime.
+  const fs::path nested = assets_root / "A033" / "SoundData" / "extra";
+  fs::create_directories(nested);
+  write_text_file(nested / "first.bin", "a");
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Simai;
+  options.enable_timing = true;
+
+  auto run = [&](const AssetsOptions &opts) {
+    std::ostringstream out;
+    std::ostringstream err;
+    auto *old_out = std::cout.rdbuf(out.rdbuf());
+    auto *old_err = std::cerr.rdbuf(err.rdbuf());
+    const int rc = run_compile_assets(opts);
+    std::cout.rdbuf(old_out);
+    std::cerr.rdbuf(old_err);
+    REQUIRE(rc == 0);
+    return err.str();
+  };
+
+  REQUIRE(run(options).find("asset_index_cache: hits=0, misses=3") !=
+          std::string::npos);
+  // Unchanged tree: every base is served from cache.
+  REQUIRE(run(options).find("asset_index_cache: hits=3, misses=0") !=
+          std::string::npos);
+
+  // std::filesystem::last_write_time reports whole seconds on this toolchain
+  // (the raw tick values end in nine zeros), and the rest of this test runs
+  // well inside one second, so the added file would otherwise carry the same
+  // timestamp as the cached one. Crossing a second boundary is deterministic
+  // given that granularity; setting the directory's time directly is not an
+  // option because Windows denies it for directories.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  write_text_file(nested / "second.bin", "b");
+
+  // Only SoundData's subdirectory changed, so only that base rebuilds.
+  REQUIRE(run(options).find("asset_index_cache: hits=2, misses=1") !=
+          std::string::npos);
+
+  // --refresh-index rebuilds everything regardless of mtimes.
+  AssetsOptions refreshed = options;
+  refreshed.refresh_asset_index = true;
+  REQUIRE(run(refreshed).find("asset_index_cache: hits=0, misses=3") !=
           std::string::npos);
 
   fs::remove_all(temp_root);
@@ -2195,10 +2260,15 @@ TEST_CASE("assets splits utage _L/_R charts into distinct L/R outputs",
 
   REQUIRE(run_compile_assets(options) == 0);
 
+  // The side marker is a prefix placed immediately after the leading "[Utage]"
+  // tag, not appended to the end of the title.
+  const std::string left_title = "[Utage](L)Mock Chart LR";
+  const std::string right_title = "[Utage](R)Mock Chart LR";
+
   const fs::path left_folder = append_utf8_path(
-      output_root, "101237_" + sanitize_folder_name(utage_title + " (L)"));
+      output_root, "101237_" + sanitize_folder_name(left_title));
   const fs::path right_folder = append_utf8_path(
-      output_root, "101237_" + sanitize_folder_name(utage_title + " (R)"));
+      output_root, "101237_" + sanitize_folder_name(right_title));
 
   REQUIRE(fs::exists(left_folder / "maidata.txt"));
   REQUIRE(fs::exists(right_folder / "maidata.txt"));
@@ -2207,10 +2277,8 @@ TEST_CASE("assets splits utage _L/_R charts into distinct L/R outputs",
   const std::string right_maidata =
       read_text_file(right_folder / "maidata.txt");
 
-  REQUIRE(left_maidata.find("&title=" + utage_title + " (L)") !=
-          std::string::npos);
-  REQUIRE(right_maidata.find("&title=" + utage_title + " (R)") !=
-          std::string::npos);
+  REQUIRE(left_maidata.find("&title=" + left_title) != std::string::npos);
+  REQUIRE(right_maidata.find("&title=" + right_title) != std::string::npos);
   REQUIRE(left_maidata.find("&inote_7=") != std::string::npos);
   REQUIRE(right_maidata.find("&inote_7=") != std::string::npos);
 

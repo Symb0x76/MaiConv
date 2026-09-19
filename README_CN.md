@@ -8,7 +8,7 @@ MaiConv 是 [MaichartConverter](https://github.com/Neskol/MaichartConverter) 的
 
 - [ ] 在 `assets` 流程中补齐反向资产导出（三项反向转换中仅 `mp4->dat` 已实现；`png->ab` 与 `mp3->acb+awb` 尚未实现，执行会直接报错退出，详见 TODO.md Milestone C）
 - [ ] 实现本地lz4取代对UABE的依赖以提升跨平台性能
-- [x] 宴谱分离 1P/2P 并在输出目录名与 `maidata` 的 `&title=` 追加 `(L)/(R)`
+- [x] 宴谱分离 1P/2P 并在输出目录名与 `maidata` 的 `&title=` 标注 `(L)/(R)`
 
 ## 特性
 
@@ -168,12 +168,13 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat 
 - `--id` 和 `--difficulty` 支持逗号分隔多条件，每一项可为数字或正则
 - `--version` 支持逗号分隔多条件，每一项可为版本 id（数字）、版本名或正则
 - `--difficulty` 使用导出的 `maidata` 难度编号：普通谱通常是 `2..6`，宴谱是 `7`
-- 对宴谱而言，若同一谱面目录同时存在 `*_L.ma2` 与 `*_R.ma2`，MaiConv 会拆分导出两份结果，并在目录名与 `maidata` `&title=` 追加 `(L)` / `(R)`
+- 对宴谱而言，若同一谱面目录同时存在 `*_L.ma2` 与 `*_R.ma2`，MaiConv 会拆分导出两份结果，并把 `(L)` / `(R)` 插入标题开头 `[...]` 标签之后（`[Utage](L)曲名`），目录名与 `maidata` `&title=` 均如此
 - 对已拆分的宴谱，`--difficulty 7` 会同时命中 `(L)` 与 `(R)` 两份输出
 - `--resume`（`--skip-existing`）会跳过已存在完整导出的曲目；`_Incomplete` 曲目仍会继续尝试补全
   - 每次运行都会把影响产物内容的选项（`--format`、`--display`、`--rotate`、`--shift`）记录到输出根目录的 `.maiconv-export.json`
   - 若本次选项与已有导出不一致，`--resume` 不会跳过任何曲目并给出警告：simai 与 maidata 的产物同名为 `maidata.txt`，无法仅凭文件名区分
   - 输出目录中没有 `.maiconv-export.json` 时视为兼容（该导出早于此检查）
+- `--refresh-index` 强制重建资产索引，不复用缓存。缓存依据目录修改时间校验，无法察觉原地修改的文件，也无法察觉深于一层子目录的新增文件
 - `--types` 支持逗号分隔：
   `maidata.txt` / `track.mp3` / `bg.png` / `pv.mp4`
   （别名：`chart|ma2`、`audio|music`、`cover|jacket|bg`、`video|movie|pv`）
@@ -267,7 +268,7 @@ assets 导出时每首歌必含 `maidata.txt`，媒体目标文件名为：
 ```
 
 当源媒体缺失时，`track.mp3`/`bg.png`/`pv.mp4` 可能不存在（除非启用 `--dummy`）。
-对已拆分的宴谱，输出目录会变为 `{id_title} (L)` 与 `{id_title} (R)`，两份 `maidata` 的标题也会带相同后缀。
+对已拆分的宴谱，乐曲 id 保持不变；两侧通过标题开头 `[...]` 标签之后的 `(L)` / `(R)` 标记区分，目录名形如 `{id}_[Utage](L){title}`，两份 `maidata` 标题带相同标记。注意 `_index.json` 以乐曲 id 为键，L/R 两侧仍只会出现一条记录。
 
 当源素材是原版游戏格式时，`assets` 的转换策略如下：
 - `acb + awb -> track.mp3`（统一使用外部 `ffmpeg` 转码）

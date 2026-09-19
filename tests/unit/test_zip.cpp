@@ -70,15 +70,21 @@ TEST_CASE("zip refuses non-directory input") {
   fs::remove_all(temp_root);
 }
 
-TEST_CASE("zip refuses when target zip already exists") {
+TEST_CASE("zip replaces a stale archive from an earlier run") {
   const fs::path temp_root = unique_temp_dir("exists");
   const fs::path folder = temp_root / "track";
+  const fs::path zip_path = temp_root / "track.zip";
   fs::create_directories(folder);
   write_text_file(folder / "a.txt", "a");
-  write_text_file(temp_root / "track.zip", "existing");
+  write_text_file(zip_path, "existing");
 
-  REQUIRE(!maiconv::zip_folder_and_remove(folder));
-  REQUIRE(fs::exists(folder));
+  // Refusing here used to leave the caller reporting success while an
+  // un-zipped folder sat beside the old archive.
+  REQUIRE(maiconv::zip_folder_and_remove(folder));
+  REQUIRE_FALSE(fs::exists(folder));
+  REQUIRE(fs::exists(zip_path));
+  // The stale placeholder was replaced by a real archive, not appended to.
+  REQUIRE(file_starts_with(zip_path, {0x50U, 0x4BU, 0x03U, 0x04U}));
 
   fs::remove_all(temp_root);
 }

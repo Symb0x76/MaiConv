@@ -119,6 +119,8 @@ detect_utage_player_side_from_chart(const std::filesystem::path &chart_path) {
   return UtagePlayerSide::None;
 }
 
+// Used for the id-only fallback folder name, where the marker has to keep two
+// sides of the same music id apart (e.g. "101234 (L)").
 std::string utage_player_side_suffix(UtagePlayerSide side) {
   if (side == UtagePlayerSide::Left) {
     return " (L)";
@@ -127,6 +129,27 @@ std::string utage_player_side_suffix(UtagePlayerSide side) {
     return " (R)";
   }
   return "";
+}
+
+// Used in display titles, where the marker sits immediately after the leading
+// bracketed tag rather than at the end: "[Utage](L)Song".
+std::string utage_player_side_marker(UtagePlayerSide side) {
+  if (side == UtagePlayerSide::Left) {
+    return "(L)";
+  }
+  if (side == UtagePlayerSide::Right) {
+    return "(R)";
+  }
+  return "";
+}
+
+// Offset just past a leading "[...]" tag, or 0 when the title has none.
+std::size_t utage_marker_insert_position(const std::string &title) {
+  if (title.empty() || title.front() != '[') {
+    return 0;
+  }
+  const auto close = title.find(']');
+  return close == std::string::npos ? 0 : close + 1;
 }
 
 bool is_reserved_music_id(const std::string &id) {
@@ -359,12 +382,11 @@ export_display_title(const TrackInfo &info,
     }
   }
 
-  const std::string side_suffix = utage_player_side_suffix(utage_side);
-  if (info.is_utage && !side_suffix.empty()) {
-    if (title.size() < side_suffix.size() ||
-        title.compare(title.size() - side_suffix.size(), side_suffix.size(),
-                      side_suffix) != 0) {
-      title += side_suffix;
+  const std::string side_marker = utage_player_side_marker(utage_side);
+  if (info.is_utage && !side_marker.empty()) {
+    const std::size_t at = utage_marker_insert_position(title);
+    if (title.compare(at, side_marker.size(), side_marker) != 0) {
+      title.insert(at, side_marker);
     }
   }
 
@@ -1463,20 +1485,29 @@ TrackProcessResult process_track_folder(
     }
 
     if (!incomplete) {
+      if (options.export_zip) {
+        const auto zip_begin = std::chrono::steady_clock::now();
+        const bool zipped = zip_and_remove(track_output);
+        result.timing.write_zip.add(std::chrono::steady_clock::now() -
+                                    zip_begin);
+        if (!zipped) {
+          // Chart and media were written, but the archive the user asked for
+          // was not produced. Reporting this as a warning let the run print
+          // "Completed:" and exit 0 while leaving an un-zipped folder behind.
+          // With --ignore it is collected into the failed-tracks summary.
+          result.info = info;
+          result.final_track_output = final_track_output;
+          result.emit_track_output = true;
+          result.fatal_error = "Zip export failed for " + info.id + " " +
+                               info.name + ": " + path_to_utf8(track_output);
+          return result;
+        }
+      }
+
       result.compiled_track = std::make_pair(to_int(info.id), info.name);
       const std::string collection_name =
           category.empty() ? "default" : category;
       result.collection_entry = std::make_pair(collection_name, info.id);
-
-      if (options.export_zip) {
-        const auto zip_begin = std::chrono::steady_clock::now();
-        if (!zip_and_remove(track_output)) {
-          push_warning(result.warnings,
-                       "Zip export failed: " + path_to_utf8(track_output));
-        }
-        result.timing.write_zip.add(std::chrono::steady_clock::now() -
-                                    zip_begin);
-      }
     }
 
     result.info = std::move(info);
@@ -1611,15 +1642,18 @@ int run_compile_assets(const AssetsOptions &requested_options) {
     std::size_t music_index_hits = 0;
     std::size_t music_index_misses = 0;
     const auto music_indexes = build_asset_indexes_cached(
-        music_bases, index_cache_root, &music_index_hits, &music_index_misses);
+        music_bases, index_cache_root, &music_index_hits, &music_index_misses,
+        options.refresh_asset_index);
     std::size_t cover_index_hits = 0;
     std::size_t cover_index_misses = 0;
     const auto cover_indexes = build_asset_indexes_cached(
-        cover_bases, index_cache_root, &cover_index_hits, &cover_index_misses);
+        cover_bases, index_cache_root, &cover_index_hits, &cover_index_misses,
+        options.refresh_asset_index);
     std::size_t video_index_hits = 0;
     std::size_t video_index_misses = 0;
     const auto video_indexes = build_asset_indexes_cached(
-        video_bases, index_cache_root, &video_index_hits, &video_index_misses);
+        video_bases, index_cache_root, &video_index_hits, &video_index_misses,
+        options.refresh_asset_index);
     timing.asset_index_cache_hits =
         music_index_hits + cover_index_hits + video_index_hits;
     timing.asset_index_cache_misses =

@@ -18,6 +18,7 @@
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <iostream>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -465,6 +466,21 @@ std::wstring quote_windows_argument(const std::wstring &arg) {
   return out;
 }
 
+// resolve_ffmpeg_executable returns empty when ffmpeg could not be found in a
+// trusted location. Report that once per process rather than once per track,
+// and distinguish it from a genuine conversion failure.
+bool ffmpeg_available_or_warn() {
+  static const bool available = []() {
+    if (!resolve_ffmpeg_executable().empty()) {
+      return true;
+    }
+    std::cerr << "ffmpeg was not found next to MaiConv or on PATH. Set "
+                 "MAICONV_FFMPEG to its full path.\n";
+    return false;
+  }();
+  return available;
+}
+
 std::wstring build_windows_command_line(const std::vector<std::wstring> &args) {
   std::wstring command_line =
       quote_windows_argument(resolve_ffmpeg_executable());
@@ -487,6 +503,34 @@ bool wait_process_success(HANDLE process_handle, HANDLE thread_handle) {
   return wait_rc == WAIT_OBJECT_0 && exit_code == 0;
 }
 
+// Directory of the running executable, then PATH. Deliberately omits the
+// current directory; see resolve_ffmpeg_executable below.
+std::wstring ffmpeg_search_path() {
+  std::wstring result;
+
+  std::wstring module_path(MAX_PATH, L'\0');
+  const DWORD length = GetModuleFileNameW(
+      nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
+  if (length > 0 && length < module_path.size()) {
+    module_path.resize(length);
+    const auto directory =
+        std::filesystem::path(module_path).parent_path().wstring();
+    if (!directory.empty()) {
+      result = directory;
+    }
+  }
+
+  if (const auto env_path = read_non_empty_wenv(L"PATH");
+      env_path.has_value()) {
+    if (!result.empty()) {
+      result.push_back(L';');
+    }
+    result += *env_path;
+  }
+
+  return result;
+}
+
 std::wstring resolve_ffmpeg_executable() {
   static std::once_flag once;
   static std::wstring cached;
@@ -498,12 +542,22 @@ std::wstring resolve_ffmpeg_executable() {
     }
 
     const wchar_t *file = L"ffmpeg.exe";
+
+    // SearchPathW with a null lpPath searches the CURRENT DIRECTORY second,
+    // ahead of the system directories and PATH. Exporting inside an untrusted
+    // folder of extracted game assets would then run an ffmpeg.exe planted
+    // there. Search an explicit list instead: the directory holding MaiConv
+    // (so a bundled ffmpeg still wins) followed by PATH, and never the
+    // current directory.
+    const std::wstring search_path = ffmpeg_search_path();
+    const wchar_t *search_path_arg =
+        search_path.empty() ? nullptr : search_path.c_str();
     const DWORD needed =
-        SearchPathW(nullptr, file, nullptr, 0, nullptr, nullptr);
+        SearchPathW(search_path_arg, file, nullptr, 0, nullptr, nullptr);
     if (needed > 0) {
       std::wstring buffer(static_cast<std::size_t>(needed), L'\0');
-      const DWORD written =
-          SearchPathW(nullptr, file, nullptr, needed, buffer.data(), nullptr);
+      const DWORD written = SearchPathW(search_path_arg, file, nullptr, needed,
+                                        buffer.data(), nullptr);
       if (written > 0) {
         buffer.resize(static_cast<std::size_t>(written));
         cached = std::move(buffer);
@@ -511,13 +565,20 @@ std::wstring resolve_ffmpeg_executable() {
       }
     }
 
-    cached = file;
+    // Deliberately left empty rather than falling back to the bare name
+    // "ffmpeg.exe": CreateProcessW resolves a bare name against the current
+    // directory too, which is the same hijack by another route. Callers treat
+    // an empty path as "ffmpeg not found".
+    cached.clear();
   });
   return cached;
 }
 
 [[maybe_unused]] bool
 run_ffmpeg_process(const std::vector<std::wstring> &args) {
+  if (!ffmpeg_available_or_warn()) {
+    return false;
+  }
   if (args.empty()) {
     return false;
   }
@@ -542,6 +603,9 @@ run_ffmpeg_process(const std::vector<std::wstring> &args) {
 
 bool run_ffmpeg_capture_stdout(const std::vector<std::wstring> &args,
                                std::vector<uint8_t> &stdout_bytes) {
+  if (!ffmpeg_available_or_warn()) {
+    return false;
+  }
   if (args.empty()) {
     return false;
   }
@@ -622,6 +686,9 @@ bool run_ffmpeg_capture_stdout(const std::vector<std::wstring> &args,
 
 bool run_ffmpeg_feed_stdin(const std::vector<std::wstring> &args,
                            const std::vector<uint8_t> &stdin_bytes) {
+  if (!ffmpeg_available_or_warn()) {
+    return false;
+  }
   if (args.empty()) {
     return false;
   }

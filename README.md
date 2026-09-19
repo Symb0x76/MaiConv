@@ -8,7 +8,7 @@ Cross-platform C++ reimplementation and enhancement of [MaichartConverter](https
 
 - [ ] Implement local lz4 decompression in replacement of Unity LZ4 library (currently used via UABE code paths and is not performance-critical)
 - [ ] Add reverse asset export in `assets` workflow (of the three reverse conversions only `mp4->dat` is implemented; `png->ab` and `mp3->acb+awb` are not implemented and exit with an error — see TODO.md Milestone C)
-- [x] Separate 1P/2P Utage charts and append `(L)/(R)` to output folder names and `maidata` `&title=`
+- [x] Separate 1P/2P Utage charts and mark them with `(L)/(R)` in output folder names and `maidata` `&title=`
 ## Features
 
 - C++23 + CMake + git submodule (runtime deps in third_party)
@@ -160,12 +160,13 @@ Selection rules:
 - `--id` and `--difficulty` accept comma-separated filters, and each filter can be an exact number or a regex
 - `--version` accepts comma-separated filters, and each filter can be a version id (number), version name, or a regex
 - `--difficulty` uses exported `maidata` numbering: standard charts are usually `2..6`, utage is `7`
-- for Utage tracks, when both `*_L.ma2` and `*_R.ma2` exist in the same chart folder, MaiConv exports two outputs and appends `(L)` / `(R)` to both folder name and `maidata` `&title=`
+- for Utage tracks, when both `*_L.ma2` and `*_R.ma2` exist in the same chart folder, MaiConv exports two outputs and inserts `(L)` / `(R)` into the title, immediately after the leading `[...]` tag (`[Utage](L)Song`), in both the folder name and `maidata` `&title=`
 - `--difficulty 7` matches both `(L)` and `(R)` outputs for split Utage charts
 - `--resume` (`--skip-existing`) skips tracks that already have complete exports, while keeping `_Incomplete` tracks eligible for retry
   - each run records its content-affecting options (`--format`, `--display`, `--rotate`, `--shift`) in `.maiconv-export.json` at the output root
   - if those differ from the existing export, `--resume` skips nothing and warns, because a simai and a maidata export are both named `maidata.txt` and cannot be told apart by filename
   - an output directory with no `.maiconv-export.json` predates this check and is treated as compatible
+- `--refresh-index` rebuilds the asset index instead of reusing the cached one. The cache is validated by directory modification times, which cannot see a file edited in place or one added more than one level below an asset folder
 - `--types` accepts comma-separated values:
   `maidata.txt`/`track.mp3`/`bg.png`/`pv.mp4`
   (aliases: `chart|ma2`, `audio|music`, `cover|jacket|bg`, `video|movie|pv`)
@@ -261,7 +262,7 @@ For assets export, each song folder always contains `maidata.txt`, and media tar
 ```
 
 `track.mp3`/`bg.png`/`pv.mp4` may be missing when source media is unavailable (unless `--dummy` is used).
-For split Utage tracks, output folder names become `{id_title} (L)` and `{id_title} (R)`, and both `maidata` titles carry the same suffix.
+For split Utage tracks the music id is unchanged; the two sides are told apart by an `(L)` / `(R)` marker placed just after the title's leading `[...]` tag, so a folder is named `{id}_[Utage](L){title}`. Both `maidata` titles carry the same marker. Note that `_index.json` is keyed by music id, so an L/R pair still appears as a single entry.
 
 When source media is in original game formats, `assets` converts them as follows:
 - `acb + awb -> track.mp3` (always transcoded by external `ffmpeg`)

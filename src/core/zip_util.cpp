@@ -116,10 +116,23 @@ bool zip_folder_and_remove(const std::filesystem::path &folder) {
     return false;
   }
 
-  const std::filesystem::path zip_path = folder.string() + ".zip";
+  // Append to the native path rather than going through folder.string(): on
+  // Windows that conversion uses the active code page and mangles non-ASCII
+  // titles, which are the norm here. assets.cpp derives the same path with
+  // `zip_path += ".zip"`, and the two must agree or --zip --resume looks for a
+  // file that was written under a different name.
+  std::filesystem::path zip_path = folder;
+  zip_path += ".zip";
+
   std::error_code ec;
+  // A stale archive from an earlier run is replaced. Refusing here used to
+  // leave the caller with a warning it treated as non-fatal, so a re-run
+  // reported success while leaving an un-zipped folder beside the old zip.
   if (std::filesystem::exists(zip_path, ec)) {
-    return false;
+    std::filesystem::remove(zip_path, ec);
+    if (ec) {
+      return false;
+    }
   }
   std::ofstream zip(zip_path, std::ios::binary | std::ios::trunc);
   if (!zip) {

@@ -132,10 +132,9 @@ std::string root_pick_key(const std::filesystem::path &path);
 std::vector<std::filesystem::path>
 detect_asset_bases(const std::vector<std::filesystem::path> &source_roots,
                    const std::string &folder_name);
-std::vector<AssetIndex>
-build_asset_indexes_cached(const std::vector<std::filesystem::path> &bases,
-                           const std::filesystem::path &cache_root,
-                           std::size_t *cache_hits = nullptr,
-                           std::size_t *cache_misses = nullptr);
+std::vector<AssetIndex> build_asset_indexes_cached(
+    const std::vector<std::filesystem::path> &bases,
+    const std::filesystem::path &cache_root, std::size_t *cache_hits = nullptr,
+    std::size_t *cache_misses = nullptr, bool refresh = false);
 
 } // namespace maiconv

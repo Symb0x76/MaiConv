@@ -49,6 +49,9 @@ struct AssetsOptions {
   std::optional<FlipMethod> rotate;
   int shift_ticks = 0;
 
+  // Rebuild the asset index even when a cached one looks current. The cache is
+  // validated by directory mtimes, which cannot see every change.
+  bool refresh_asset_index = false;
   bool ignore_incomplete_assets = false;
   bool dummy_assets = false;
   bool skip_existing_exports = false;

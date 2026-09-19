@@ -28,10 +28,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -45,11 +47,48 @@ namespace {
 
 constexpr uint32_t kTexture2DClassId = 28;
 
+// Unpacked bundles used to land directly in the shared temp directory as
+// "maiconv_unpacked_bundle_<N>.ab", with N counting from 0 in each process.
+// Two concurrent MaiConv processes therefore collided on the same path, and on
+// POSIX a pre-planted symlink at that predictable name could redirect the
+// write (CWE-377). Each process now owns a uniquely named directory and places
+// its bundles inside it, and removes the directory on exit.
+class TempBundleDir {
+public:
+  TempBundleDir() {
+    const auto stamp =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch())
+            .count();
+    const auto salt = static_cast<unsigned long long>(std::random_device{}());
+    root_ = std::filesystem::temp_directory_path() /
+            ("maiconv_bundle_" + std::to_string(stamp) + "_" +
+             std::to_string(salt));
+    std::error_code ec;
+    std::filesystem::create_directories(root_, ec);
+  }
+
+  TempBundleDir(const TempBundleDir &) = delete;
+  TempBundleDir &operator=(const TempBundleDir &) = delete;
+
+  ~TempBundleDir() {
+    std::error_code ec;
+    std::filesystem::remove_all(root_, ec);
+  }
+
+  [[nodiscard]] std::filesystem::path make_path() {
+    const auto id = counter_.fetch_add(1, std::memory_order_relaxed);
+    return root_ / ("unpacked_" + std::to_string(id) + ".ab");
+  }
+
+private:
+  std::filesystem::path root_;
+  std::atomic<unsigned long long> counter_{0};
+};
+
 std::filesystem::path make_temp_bundle_path() {
-  static std::atomic<unsigned long long> counter{0};
-  const auto id = counter.fetch_add(1, std::memory_order_relaxed);
-  return std::filesystem::temp_directory_path() /
-         ("maiconv_unpacked_bundle_" + std::to_string(id) + ".ab");
+  static TempBundleDir dir;
+  return dir.make_path();
 }
 
 struct TexturePayload {
