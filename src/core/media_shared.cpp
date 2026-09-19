@@ -1402,9 +1402,18 @@ bool parse_utf_table_at(const std::vector<uint8_t> &bytes, std::size_t offset,
   if (rows_begin > table_end) {
     return false;
   }
-  const std::size_t total_rows_size = static_cast<std::size_t>(row_length) *
-                                      static_cast<std::size_t>(row_count);
-  if (total_rows_size > table_end - rows_begin) {
+  // row_length (uint16) and row_count (uint32) both come straight from the
+  // table header. Multiplying them first lets row_length == 0 zero the
+  // product, so the bounds check passes for any row_count and the reserve
+  // below is then asked for up to 4 billion entries. Derive the ceiling by
+  // division instead, which cannot overflow.
+  const std::size_t rows_available = table_end - rows_begin;
+  if (row_length == 0) {
+    if (row_count != 0) {
+      return false;
+    }
+  } else if (static_cast<std::size_t>(row_count) >
+             rows_available / static_cast<std::size_t>(row_length)) {
     return false;
   }
 

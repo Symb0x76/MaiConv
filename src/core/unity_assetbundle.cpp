@@ -1,4 +1,5 @@
 #include "maiconv/core/io.hpp"
+#include "maiconv/core/unity_assetbundle_internal.hpp"
 
 #include "uabe/AssetsTools/AssetBundleFileFormat.h"
 #include "uabe/AssetsTools/AssetTypeClass.h"
@@ -115,6 +116,12 @@ bool read_texture_payload(TexturePayload &out,
 
   out.width = width->GetValue()->AsUInt();
   out.height = height->GetValue()->AsUInt();
+  // Validate at the parse boundary: every decoder sizes buffers from these two
+  // fields, so checking once here covers all of them, including the D3D11/BC7
+  // path that never touches the block-count arithmetic.
+  if (!texture_dimensions_plausible(out.width, out.height)) {
+    return false;
+  }
   out.format = format->GetValue()->AsUInt();
   if (!copy_byte_array_field(image_data, out.picture_data)) {
     return false;
@@ -192,11 +199,14 @@ bool load_stream_payload(AssetBundleFile &bundle, IAssetsReader *bundle_reader,
     return !payload.picture_data.empty();
   }
 
-  const auto direct_path =
-      bundle_path.parent_path() / path_from_utf8(payload.stream_path);
-  if (std::filesystem::exists(direct_path) &&
-      std::filesystem::is_regular_file(direct_path)) {
-    std::ifstream in(direct_path, std::ios::binary);
+  // The stream path comes from inside the bundle and is attacker-controlled.
+  // When it does not name a file inside the bundle's own directory, fall
+  // through to the in-bundle entry lookup below rather than opening it.
+  const auto direct_path = resolve_contained_stream_path(
+      bundle_path.parent_path(), payload.stream_path);
+  if (direct_path.has_value() && std::filesystem::exists(*direct_path) &&
+      std::filesystem::is_regular_file(*direct_path)) {
+    std::ifstream in(*direct_path, std::ios::binary);
     if (!in) {
       return false;
     }
@@ -813,6 +823,39 @@ void flip_rgba_rows(std::vector<uint8_t> &rgba, uint32_t width,
 }
 
 } // namespace
+
+bool texture_dimensions_plausible(uint32_t width, uint32_t height) {
+  if (width == 0U || height == 0U) {
+    return false;
+  }
+  return width <= kMaxTextureDimension && height <= kMaxTextureDimension;
+}
+
+std::optional<std::filesystem::path>
+resolve_contained_stream_path(const std::filesystem::path &bundle_dir,
+                              const std::string &stream_path) {
+  if (stream_path.empty()) {
+    return std::nullopt;
+  }
+
+  const std::filesystem::path relative = path_from_utf8(stream_path);
+
+  // std::filesystem::operator/ discards the left operand entirely when the
+  // right one is absolute, so an absolute stream path would otherwise be
+  // opened verbatim rather than resolved inside the bundle directory.
+  if (relative.is_absolute() || relative.has_root_name() ||
+      relative.has_root_directory()) {
+    return std::nullopt;
+  }
+
+  for (const auto &part : relative) {
+    if (part == "..") {
+      return std::nullopt;
+    }
+  }
+
+  return bundle_dir / relative;
+}
 
 bool extract_unity_texture_bundle_to_png(
     const std::filesystem::path &ab_file,

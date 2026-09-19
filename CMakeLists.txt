@@ -269,6 +269,7 @@ if(MAICONV_BUILD_TESTS)
         tests/unit/test_assets.cpp
         tests/unit/test_zip.cpp
         tests/unit/test_uabe_lz4.cpp
+        tests/unit/test_unity_assetbundle.cpp
     )
     target_link_libraries(MaiConv_unit_tests
         PRIVATE
