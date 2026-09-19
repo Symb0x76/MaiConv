@@ -811,6 +811,22 @@ struct TrackProcessResult {
   AssetsTimingSummary timing;
 };
 
+// One chart file chosen for export, with the difficulty slot it lands in.
+struct SelectedChart {
+  std::filesystem::path ma2_file;
+  int output_difficulty = 1;
+  UtagePlayerSide utage_side = UtagePlayerSide::None;
+};
+
+// What the chart pass produces beyond the files it writes. The duration of the
+// longest chart feeds dummy audio generation later, and the two clocks are
+// reported separately because composing and writing are measured apart.
+struct ChartExportResult {
+  double longest_chart_seconds = 0.0;
+  std::chrono::steady_clock::duration parse_compose{};
+  std::chrono::steady_clock::duration write{};
+};
+
 // Every asset kind is looked up the same way: candidate base directories
 // paired with a prebuilt index of each. These are non-owning views, built once
 // per run and passed down, so that the pairing stays visible instead of
@@ -831,6 +847,359 @@ struct TrackFilters {
   const NumericFilterSet &difficulty;
   const VersionFilterSet &version;
 };
+
+// Parses, transforms and writes the chart documents for one track.
+ChartExportResult
+export_track_charts(const TrackInfo &info,
+                    const std::vector<SelectedChart> &selected_charts,
+                    const AssetsOptions &options, bool export_chart,
+                    UtagePlayerSide forced_utage_side,
+                    const std::filesystem::path &track_output) {
+  ChartExportResult chart_result;
+  auto &ma2_duration = chart_result.parse_compose;
+  auto &write_duration = chart_result.write;
+  auto &longest_chart_seconds = chart_result.longest_chart_seconds;
+  Ma2Tokenizer tokenizer;
+  Ma2Parser parser;
+  Ma2Composer ma2_composer;
+  simai::Compiler simai_composer;
+
+  std::map<int, std::string> inotes;
+  for (const auto &selected_chart : selected_charts) {
+    const auto &ma2_file = selected_chart.ma2_file;
+    const int output_difficulty = selected_chart.output_difficulty;
+    ScopedDuration ma2_timer(ma2_duration);
+    const auto chart = parser.parse(tokenizer.tokenize_file(ma2_file));
+    Chart transformed = chart;
+    if (options.rotate.has_value()) {
+      transformed.rotate(*options.rotate);
+    }
+    if (options.shift_ticks != 0) {
+      transformed.shift_by_offset(options.shift_ticks);
+    }
+    longest_chart_seconds = std::max(
+        longest_chart_seconds, estimate_chart_duration_seconds(transformed));
+
+    if (!export_chart) {
+      continue;
+    }
+
+    if (options.format == ChartFormat::Simai ||
+        options.format == ChartFormat::SimaiFes ||
+        options.format == ChartFormat::Maidata) {
+      if (info.is_utage && inotes.find(output_difficulty) != inotes.end()) {
+        continue;
+      }
+      inotes[output_difficulty] = simai_composer.compile_chart(transformed);
+    } else {
+      const std::string text =
+          ma2_composer.compose(transformed, options.format);
+      // The write is measured separately, so stop the parse/compose clock
+      // before it rather than letting the destructor cover both.
+      ma2_timer.stop();
+      ScopedDuration write_timer(write_duration);
+      write_text_file(track_output / "result.ma2", text);
+    }
+  }
+
+  if (export_chart &&
+      (options.format == ChartFormat::Maidata || !inotes.empty())) {
+    ScopedDuration write_timer(write_duration);
+    const std::string payload =
+        (options.format == ChartFormat::Maidata)
+            ? compose_maidata_document(info, inotes, options.maidata_level_mode,
+                                       forced_utage_side)
+            : compose_simai_document(info, inotes);
+    write_text_file(track_output / "maidata.txt", payload);
+  }
+  return chart_result;
+}
+
+// Audio: prefers an already-compressed mp3/ogg, then an acb+awb pair.
+// Returns true when the asset could not be produced, which marks the
+// track incomplete.
+bool export_track_audio(const TrackInfo &info, const TrackMediaIds &media_ids,
+                        const AssetSource &source,
+                        const std::filesystem::path &track_output,
+                        std::vector<std::string> &warnings) {
+  bool incomplete = false;
+  std::vector<std::string> stems;
+  std::vector<std::string> primary_candidates;
+  std::vector<std::string> secondary_candidates;
+  std::vector<std::string> lookup_names;
+  media_shared_clear_ffmpeg_failures();
+  stems.clear();
+  stems.reserve(6);
+  append_unique_string(stems, "music" + info.id);
+  append_unique_string(stems, "music" + media_ids.non_dx);
+  append_unique_string(stems, "music00" + media_ids.non_dx_short);
+  append_unique_string(stems, "music" + media_ids.cue);
+  append_unique_string(stems, "music00" + media_ids.cue_short);
+
+  append_suffix_candidates(stems, {".mp3", ".ogg"}, primary_candidates);
+  append_suffix_candidates(stems, {".acb", ".awb"}, secondary_candidates);
+  lookup_names.clear();
+  lookup_names.reserve(primary_candidates.size() + secondary_candidates.size());
+  lookup_names.insert(lookup_names.end(), primary_candidates.begin(),
+                      primary_candidates.end());
+  lookup_names.insert(lookup_names.end(), secondary_candidates.begin(),
+                      secondary_candidates.end());
+
+  const auto found_audio =
+      find_asset_candidates_in_indexes(source.indexes, lookup_names);
+  const auto compressed_audio =
+      first_found_candidate_in_order(found_audio, primary_candidates);
+  if (!compressed_audio.empty()) {
+    const std::string ext = lower(path_to_utf8(compressed_audio.extension()));
+    if (ext == ".mp3") {
+      std::filesystem::copy_file(
+          compressed_audio, track_output / "track.mp3",
+          std::filesystem::copy_options::overwrite_existing);
+    } else {
+      if (!convert_audio_to_mp3(compressed_audio, track_output / "track.mp3")) {
+        push_warning(warnings, with_ffmpeg_detail(
+                                   "Audio conversion failed: " +
+                                   path_to_utf8(compressed_audio) + " -> " +
+                                   path_to_utf8(track_output / "track.mp3")));
+        incomplete = true;
+      }
+    }
+  } else {
+    std::filesystem::path acb_source;
+    std::filesystem::path awb_source;
+    for (const auto &base_name : stems) {
+      const auto acb_it = found_audio.find(lower(base_name + ".acb"));
+      const auto awb_it = found_audio.find(lower(base_name + ".awb"));
+      if (acb_it != found_audio.end() && awb_it != found_audio.end()) {
+        acb_source = acb_it->second;
+        awb_source = awb_it->second;
+        break;
+      }
+    }
+    if (!acb_source.empty() && !awb_source.empty()) {
+      if (!convert_acb_awb_to_mp3(acb_source, awb_source,
+                                  track_output / "track.mp3")) {
+        push_warning(warnings, with_ffmpeg_detail(
+                                   "Audio conversion failed: " +
+                                   path_to_utf8(acb_source) + " + " +
+                                   path_to_utf8(awb_source) + " -> " +
+                                   path_to_utf8(track_output / "track.mp3")));
+        incomplete = true;
+      }
+    } else {
+      push_warning(warnings,
+                   "Music missing: " + info.name + " (" + info.id + ")");
+      incomplete = true;
+    }
+  }
+  return incomplete;
+}
+
+// Cover: prefers a plain image, then an .ab bundle, which may itself be a
+// renamed image rather than a real Unity bundle.
+// Returns true when the asset could not be produced, which marks the
+// track incomplete.
+bool export_track_cover(const TrackInfo &info, const TrackMediaIds &media_ids,
+                        const AssetSource &source,
+                        const std::filesystem::path &track_output,
+                        std::vector<std::string> &warnings) {
+  bool incomplete = false;
+  std::vector<std::string> stems;
+  std::vector<std::string> primary_candidates;
+  std::vector<std::string> secondary_candidates;
+  std::vector<std::string> lookup_names;
+  media_shared_clear_ffmpeg_failures();
+  stems.clear();
+  stems.reserve(8);
+  append_unique_string(stems, "UI_Jacket_" + info.id);
+  append_unique_string(stems, "UI_Jacket_00" + media_ids.non_dx_short);
+  append_unique_string(stems, "ui_jacket_" + info.id);
+  append_unique_string(stems, "ui_jacket_" + media_ids.non_dx);
+  append_unique_string(stems, "ui_jacket_" + info.id + "_s");
+  append_unique_string(stems, "ui_jacket_" + media_ids.non_dx + "_s");
+  append_unique_string(stems, "UI_Jacket_" + media_ids.movie);
+  append_unique_string(stems, "UI_Jacket_00" + media_ids.movie_short);
+  append_unique_string(stems, "ui_jacket_" + media_ids.movie);
+  append_unique_string(stems, "ui_jacket_00" + media_ids.movie_short);
+  append_unique_string(stems, "ui_jacket_" + media_ids.movie + "_s");
+  append_unique_string(stems, "ui_jacket_00" + media_ids.movie_short + "_s");
+
+  append_suffix_candidates(stems, {".png", ".jpg", ".jpeg"},
+                           primary_candidates);
+  append_prefixed_suffix_candidates(stems, "jacket/", {".png", ".jpg", ".jpeg"},
+                                    secondary_candidates);
+  std::vector<std::string> image_names;
+  image_names.reserve(primary_candidates.size() + secondary_candidates.size() +
+                      (stems.size() * 3));
+  image_names.insert(image_names.end(), primary_candidates.begin(),
+                     primary_candidates.end());
+  image_names.insert(image_names.end(), secondary_candidates.begin(),
+                     secondary_candidates.end());
+  append_prefixed_suffix_candidates(
+      stems, "jacket_s/", {".png", ".jpg", ".jpeg"}, secondary_candidates);
+  image_names.insert(image_names.end(), secondary_candidates.begin(),
+                     secondary_candidates.end());
+
+  append_suffix_candidates(stems, {".ab"}, primary_candidates);
+  append_prefixed_suffix_candidates(stems, "jacket/", {".ab"},
+                                    secondary_candidates);
+  std::vector<std::string> ab_names;
+  ab_names.reserve(primary_candidates.size() + secondary_candidates.size() +
+                   stems.size());
+  ab_names.insert(ab_names.end(), primary_candidates.begin(),
+                  primary_candidates.end());
+  ab_names.insert(ab_names.end(), secondary_candidates.begin(),
+                  secondary_candidates.end());
+  append_prefixed_suffix_candidates(stems, "jacket_s/", {".ab"},
+                                    secondary_candidates);
+  ab_names.insert(ab_names.end(), secondary_candidates.begin(),
+                  secondary_candidates.end());
+
+  lookup_names.clear();
+  lookup_names.reserve(image_names.size() + ab_names.size());
+  lookup_names.insert(lookup_names.end(), image_names.begin(),
+                      image_names.end());
+  lookup_names.insert(lookup_names.end(), ab_names.begin(), ab_names.end());
+  const auto found_cover =
+      find_asset_candidates_in_indexes(source.indexes, lookup_names);
+
+  const auto cover_image =
+      first_found_candidate_in_order(found_cover, image_names);
+  if (!cover_image.empty()) {
+    std::string ext = lower(path_to_utf8(cover_image.extension()));
+    if (ext.empty()) {
+      ext = ".png";
+    }
+    std::filesystem::copy_file(
+        cover_image, track_output / ("bg" + ext),
+        std::filesystem::copy_options::overwrite_existing);
+  } else {
+    bool cover_exported = false;
+    std::string last_failed_cover_ab;
+    for (const auto &ab_name : ab_names) {
+      const auto it = found_cover.find(ab_name);
+      if (it == found_cover.end() || it->second.empty()) {
+        continue;
+      }
+
+      const auto &cover_ab = it->second;
+      if (const auto pseudo_image_ext =
+              detect_image_extension_by_magic(cover_ab);
+          pseudo_image_ext.has_value()) {
+        std::filesystem::copy_file(
+            cover_ab, track_output / ("bg" + *pseudo_image_ext),
+            std::filesystem::copy_options::overwrite_existing);
+        cover_exported = true;
+        break;
+      }
+
+      if (convert_ab_to_png(cover_ab, track_output / "bg.png")) {
+        cover_exported = true;
+        break;
+      }
+      last_failed_cover_ab = path_to_utf8(cover_ab);
+    }
+
+    if (!cover_exported) {
+      if (!last_failed_cover_ab.empty()) {
+        push_warning(warnings,
+                     with_ffmpeg_detail(
+                         "Cover conversion failed: " + last_failed_cover_ab +
+                         " -> " + path_to_utf8(track_output / "bg.png")));
+      } else {
+        push_warning(warnings,
+                     "Cover missing: " + info.name + " (" + info.id + ")");
+      }
+      incomplete = true;
+    }
+  }
+  return incomplete;
+}
+
+// Video: prefers a ready mp4, then dat/usm/crid which need conversion.
+// Returns true when the asset could not be produced, which marks the
+// track incomplete.
+bool export_track_video(const TrackInfo &info, const TrackMediaIds &media_ids,
+                        const AssetSource &source,
+                        const std::filesystem::path &track_output,
+                        std::vector<std::string> &warnings) {
+  bool incomplete = false;
+  std::vector<std::string> stems;
+  std::vector<std::string> primary_candidates;
+  std::vector<std::string> secondary_candidates;
+  std::vector<std::string> lookup_names;
+  media_shared_clear_ffmpeg_failures();
+  stems.clear();
+  stems.reserve(8);
+  append_unique_string(stems, info.id);
+  append_unique_string(stems, media_ids.non_dx);
+  append_unique_string(stems, "00" + media_ids.non_dx_short);
+  append_unique_string(stems, media_ids.non_dx_short);
+  append_unique_string(stems, media_ids.movie);
+  append_unique_string(stems, "00" + media_ids.movie_short);
+  append_unique_string(stems, media_ids.movie_short);
+
+  append_suffix_candidates(stems, {".mp4"}, primary_candidates);
+  const std::vector<std::string> video_mp4_names = primary_candidates;
+  append_suffix_candidates(stems, {".dat"}, primary_candidates);
+  const std::vector<std::string> video_dat_names = primary_candidates;
+  append_suffix_candidates(stems, {".usm"}, primary_candidates);
+  const std::vector<std::string> video_usm_names = primary_candidates;
+  append_suffix_candidates(stems, {".crid"}, primary_candidates);
+  const std::vector<std::string> video_crid_names = primary_candidates;
+
+  lookup_names.clear();
+  lookup_names.reserve(video_mp4_names.size() + video_dat_names.size() +
+                       video_usm_names.size() + video_crid_names.size());
+  lookup_names.insert(lookup_names.end(), video_mp4_names.begin(),
+                      video_mp4_names.end());
+  lookup_names.insert(lookup_names.end(), video_dat_names.begin(),
+                      video_dat_names.end());
+  lookup_names.insert(lookup_names.end(), video_usm_names.begin(),
+                      video_usm_names.end());
+  lookup_names.insert(lookup_names.end(), video_crid_names.begin(),
+                      video_crid_names.end());
+  const auto found_video =
+      find_asset_candidates_in_indexes(source.indexes, lookup_names);
+
+  auto video_source =
+      first_found_candidate_in_order(found_video, video_mp4_names);
+  if (!video_source.empty()) {
+    std::filesystem::copy_file(
+        video_source, track_output / "pv.mp4",
+        std::filesystem::copy_options::overwrite_existing);
+  } else {
+    video_source = first_found_candidate_in_order(found_video, video_dat_names);
+    if (video_source.empty()) {
+      video_source =
+          first_found_candidate_in_order(found_video, video_usm_names);
+    }
+    if (video_source.empty()) {
+      video_source =
+          first_found_candidate_in_order(found_video, video_crid_names);
+    }
+
+    if (video_source.empty()) {
+      if (info.movie_debug_placeholder) {
+        push_warning(warnings, "Video missing (debug movie placeholder): " +
+                                   info.name + " (" + info.id + ")");
+      } else {
+        push_warning(warnings,
+                     "Video missing: " + info.name + " (" + info.id + ")");
+        incomplete = true;
+      }
+    } else {
+      if (!convert_dat_or_usm_to_mp4(video_source, track_output / "pv.mp4")) {
+        push_warning(warnings,
+                     with_ffmpeg_detail("Video conversion failed: " +
+                                        path_to_utf8(video_source) + " -> " +
+                                        path_to_utf8(track_output / "pv.mp4")));
+        incomplete = true;
+      }
+    }
+  }
+  return incomplete;
+}
 
 TrackProcessResult
 process_track_folder(const std::filesystem::path &folder,
@@ -908,12 +1277,6 @@ process_track_folder(const std::filesystem::path &folder,
         }
       }
     }
-
-    struct SelectedChart {
-      std::filesystem::path ma2_file;
-      int output_difficulty = 1;
-      UtagePlayerSide utage_side = UtagePlayerSide::None;
-    };
 
     std::vector<SelectedChart> selected_charts;
     std::set<std::string> selected_chart_keys;
@@ -1093,65 +1456,13 @@ process_track_folder(const std::filesystem::path &folder,
     const bool export_cover = options.export_cover;
     const bool export_video = options.export_video;
 
-    Ma2Tokenizer tokenizer;
-    Ma2Parser parser;
-    Ma2Composer ma2_composer;
-    simai::Compiler simai_composer;
-
-    std::map<int, std::string> inotes;
-    double longest_chart_seconds = 0.0;
-    std::chrono::steady_clock::duration ma2_duration{};
-    std::chrono::steady_clock::duration write_duration{};
-    for (const auto &selected_chart : selected_charts) {
-      const auto &ma2_file = selected_chart.ma2_file;
-      const int output_difficulty = selected_chart.output_difficulty;
-      ScopedDuration ma2_timer(ma2_duration);
-      const auto chart = parser.parse(tokenizer.tokenize_file(ma2_file));
-      Chart transformed = chart;
-      if (options.rotate.has_value()) {
-        transformed.rotate(*options.rotate);
-      }
-      if (options.shift_ticks != 0) {
-        transformed.shift_by_offset(options.shift_ticks);
-      }
-      longest_chart_seconds = std::max(
-          longest_chart_seconds, estimate_chart_duration_seconds(transformed));
-
-      if (!export_chart) {
-        continue;
-      }
-
-      if (options.format == ChartFormat::Simai ||
-          options.format == ChartFormat::SimaiFes ||
-          options.format == ChartFormat::Maidata) {
-        if (info.is_utage && inotes.find(output_difficulty) != inotes.end()) {
-          continue;
-        }
-        inotes[output_difficulty] = simai_composer.compile_chart(transformed);
-      } else {
-        const std::string text =
-            ma2_composer.compose(transformed, options.format);
-        // The write is measured separately, so stop the parse/compose clock
-        // before it rather than letting the destructor cover both.
-        ma2_timer.stop();
-        ScopedDuration write_timer(write_duration);
-        write_text_file(track_output / "result.ma2", text);
-      }
-    }
-    result.timing.ma2_parse_compose.add(ma2_duration);
-
-    if (export_chart &&
-        (options.format == ChartFormat::Maidata || !inotes.empty())) {
-      ScopedDuration write_timer(write_duration);
-      const std::string payload =
-          (options.format == ChartFormat::Maidata)
-              ? compose_maidata_document(
-                    info, inotes, options.maidata_level_mode, forced_utage_side)
-              : compose_simai_document(info, inotes);
-      write_text_file(track_output / "maidata.txt", payload);
-    }
-    if (write_duration != std::chrono::steady_clock::duration::zero()) {
-      result.timing.write_zip.add(write_duration);
+    const ChartExportResult chart_export =
+        export_track_charts(info, selected_charts, options, export_chart,
+                            forced_utage_side, track_output);
+    const double longest_chart_seconds = chart_export.longest_chart_seconds;
+    result.timing.ma2_parse_compose.add(chart_export.parse_compose);
+    if (chart_export.write != std::chrono::steady_clock::duration::zero()) {
+      result.timing.write_zip.add(chart_export.write);
     }
 
     bool audio_incomplete = false;
@@ -1161,267 +1472,18 @@ process_track_folder(const std::filesystem::path &folder,
     const TrackMediaIds media_ids = derive_media_ids(info);
 
     const auto media_begin = std::chrono::steady_clock::now();
-    std::vector<std::string> stems;
-    std::vector<std::string> primary_candidates;
-    std::vector<std::string> secondary_candidates;
-    std::vector<std::string> lookup_names;
 
     if (export_audio && !sources.music.bases.empty()) {
-      media_shared_clear_ffmpeg_failures();
-      stems.clear();
-      stems.reserve(6);
-      append_unique_string(stems, "music" + info.id);
-      append_unique_string(stems, "music" + media_ids.non_dx);
-      append_unique_string(stems, "music00" + media_ids.non_dx_short);
-      append_unique_string(stems, "music" + media_ids.cue);
-      append_unique_string(stems, "music00" + media_ids.cue_short);
-
-      append_suffix_candidates(stems, {".mp3", ".ogg"}, primary_candidates);
-      append_suffix_candidates(stems, {".acb", ".awb"}, secondary_candidates);
-      lookup_names.clear();
-      lookup_names.reserve(primary_candidates.size() +
-                           secondary_candidates.size());
-      lookup_names.insert(lookup_names.end(), primary_candidates.begin(),
-                          primary_candidates.end());
-      lookup_names.insert(lookup_names.end(), secondary_candidates.begin(),
-                          secondary_candidates.end());
-
-      const auto found_audio =
-          find_asset_candidates_in_indexes(sources.music.indexes, lookup_names);
-      const auto compressed_audio =
-          first_found_candidate_in_order(found_audio, primary_candidates);
-      if (!compressed_audio.empty()) {
-        const std::string ext =
-            lower(path_to_utf8(compressed_audio.extension()));
-        if (ext == ".mp3") {
-          std::filesystem::copy_file(
-              compressed_audio, track_output / "track.mp3",
-              std::filesystem::copy_options::overwrite_existing);
-        } else {
-          if (!convert_audio_to_mp3(compressed_audio,
-                                    track_output / "track.mp3")) {
-            push_warning(
-                result.warnings,
-                with_ffmpeg_detail("Audio conversion failed: " +
-                                   path_to_utf8(compressed_audio) + " -> " +
-                                   path_to_utf8(track_output / "track.mp3")));
-            audio_incomplete = true;
-          }
-        }
-      } else {
-        std::filesystem::path acb_source;
-        std::filesystem::path awb_source;
-        for (const auto &base_name : stems) {
-          const auto acb_it = found_audio.find(lower(base_name + ".acb"));
-          const auto awb_it = found_audio.find(lower(base_name + ".awb"));
-          if (acb_it != found_audio.end() && awb_it != found_audio.end()) {
-            acb_source = acb_it->second;
-            awb_source = awb_it->second;
-            break;
-          }
-        }
-        if (!acb_source.empty() && !awb_source.empty()) {
-          if (!convert_acb_awb_to_mp3(acb_source, awb_source,
-                                      track_output / "track.mp3")) {
-            push_warning(
-                result.warnings,
-                with_ffmpeg_detail(
-                    "Audio conversion failed: " + path_to_utf8(acb_source) +
-                    " + " + path_to_utf8(awb_source) + " -> " +
-                    path_to_utf8(track_output / "track.mp3")));
-            audio_incomplete = true;
-          }
-        } else {
-          push_warning(result.warnings,
-                       "Music missing: " + info.name + " (" + info.id + ")");
-          audio_incomplete = true;
-        }
-      }
+      audio_incomplete = export_track_audio(info, media_ids, sources.music,
+                                            track_output, result.warnings);
     }
     if (export_cover && !sources.cover.bases.empty()) {
-      media_shared_clear_ffmpeg_failures();
-      stems.clear();
-      stems.reserve(8);
-      append_unique_string(stems, "UI_Jacket_" + info.id);
-      append_unique_string(stems, "UI_Jacket_00" + media_ids.non_dx_short);
-      append_unique_string(stems, "ui_jacket_" + info.id);
-      append_unique_string(stems, "ui_jacket_" + media_ids.non_dx);
-      append_unique_string(stems, "ui_jacket_" + info.id + "_s");
-      append_unique_string(stems, "ui_jacket_" + media_ids.non_dx + "_s");
-      append_unique_string(stems, "UI_Jacket_" + media_ids.movie);
-      append_unique_string(stems, "UI_Jacket_00" + media_ids.movie_short);
-      append_unique_string(stems, "ui_jacket_" + media_ids.movie);
-      append_unique_string(stems, "ui_jacket_00" + media_ids.movie_short);
-      append_unique_string(stems, "ui_jacket_" + media_ids.movie + "_s");
-      append_unique_string(stems,
-                           "ui_jacket_00" + media_ids.movie_short + "_s");
-
-      append_suffix_candidates(stems, {".png", ".jpg", ".jpeg"},
-                               primary_candidates);
-      append_prefixed_suffix_candidates(
-          stems, "jacket/", {".png", ".jpg", ".jpeg"}, secondary_candidates);
-      std::vector<std::string> image_names;
-      image_names.reserve(primary_candidates.size() +
-                          secondary_candidates.size() + (stems.size() * 3));
-      image_names.insert(image_names.end(), primary_candidates.begin(),
-                         primary_candidates.end());
-      image_names.insert(image_names.end(), secondary_candidates.begin(),
-                         secondary_candidates.end());
-      append_prefixed_suffix_candidates(
-          stems, "jacket_s/", {".png", ".jpg", ".jpeg"}, secondary_candidates);
-      image_names.insert(image_names.end(), secondary_candidates.begin(),
-                         secondary_candidates.end());
-
-      append_suffix_candidates(stems, {".ab"}, primary_candidates);
-      append_prefixed_suffix_candidates(stems, "jacket/", {".ab"},
-                                        secondary_candidates);
-      std::vector<std::string> ab_names;
-      ab_names.reserve(primary_candidates.size() + secondary_candidates.size() +
-                       stems.size());
-      ab_names.insert(ab_names.end(), primary_candidates.begin(),
-                      primary_candidates.end());
-      ab_names.insert(ab_names.end(), secondary_candidates.begin(),
-                      secondary_candidates.end());
-      append_prefixed_suffix_candidates(stems, "jacket_s/", {".ab"},
-                                        secondary_candidates);
-      ab_names.insert(ab_names.end(), secondary_candidates.begin(),
-                      secondary_candidates.end());
-
-      lookup_names.clear();
-      lookup_names.reserve(image_names.size() + ab_names.size());
-      lookup_names.insert(lookup_names.end(), image_names.begin(),
-                          image_names.end());
-      lookup_names.insert(lookup_names.end(), ab_names.begin(), ab_names.end());
-      const auto found_cover =
-          find_asset_candidates_in_indexes(sources.cover.indexes, lookup_names);
-
-      const auto cover_image =
-          first_found_candidate_in_order(found_cover, image_names);
-      if (!cover_image.empty()) {
-        std::string ext = lower(path_to_utf8(cover_image.extension()));
-        if (ext.empty()) {
-          ext = ".png";
-        }
-        std::filesystem::copy_file(
-            cover_image, track_output / ("bg" + ext),
-            std::filesystem::copy_options::overwrite_existing);
-      } else {
-        bool cover_exported = false;
-        std::string last_failed_cover_ab;
-        for (const auto &ab_name : ab_names) {
-          const auto it = found_cover.find(ab_name);
-          if (it == found_cover.end() || it->second.empty()) {
-            continue;
-          }
-
-          const auto &cover_ab = it->second;
-          if (const auto pseudo_image_ext =
-                  detect_image_extension_by_magic(cover_ab);
-              pseudo_image_ext.has_value()) {
-            std::filesystem::copy_file(
-                cover_ab, track_output / ("bg" + *pseudo_image_ext),
-                std::filesystem::copy_options::overwrite_existing);
-            cover_exported = true;
-            break;
-          }
-
-          if (convert_ab_to_png(cover_ab, track_output / "bg.png")) {
-            cover_exported = true;
-            break;
-          }
-          last_failed_cover_ab = path_to_utf8(cover_ab);
-        }
-
-        if (!cover_exported) {
-          if (!last_failed_cover_ab.empty()) {
-            push_warning(
-                result.warnings,
-                with_ffmpeg_detail(
-                    "Cover conversion failed: " + last_failed_cover_ab +
-                    " -> " + path_to_utf8(track_output / "bg.png")));
-          } else {
-            push_warning(result.warnings,
-                         "Cover missing: " + info.name + " (" + info.id + ")");
-          }
-          cover_incomplete = true;
-        }
-      }
+      cover_incomplete = export_track_cover(info, media_ids, sources.cover,
+                                            track_output, result.warnings);
     }
     if (export_video && !sources.video.bases.empty()) {
-      media_shared_clear_ffmpeg_failures();
-      stems.clear();
-      stems.reserve(8);
-      append_unique_string(stems, info.id);
-      append_unique_string(stems, media_ids.non_dx);
-      append_unique_string(stems, "00" + media_ids.non_dx_short);
-      append_unique_string(stems, media_ids.non_dx_short);
-      append_unique_string(stems, media_ids.movie);
-      append_unique_string(stems, "00" + media_ids.movie_short);
-      append_unique_string(stems, media_ids.movie_short);
-
-      append_suffix_candidates(stems, {".mp4"}, primary_candidates);
-      const std::vector<std::string> video_mp4_names = primary_candidates;
-      append_suffix_candidates(stems, {".dat"}, primary_candidates);
-      const std::vector<std::string> video_dat_names = primary_candidates;
-      append_suffix_candidates(stems, {".usm"}, primary_candidates);
-      const std::vector<std::string> video_usm_names = primary_candidates;
-      append_suffix_candidates(stems, {".crid"}, primary_candidates);
-      const std::vector<std::string> video_crid_names = primary_candidates;
-
-      lookup_names.clear();
-      lookup_names.reserve(video_mp4_names.size() + video_dat_names.size() +
-                           video_usm_names.size() + video_crid_names.size());
-      lookup_names.insert(lookup_names.end(), video_mp4_names.begin(),
-                          video_mp4_names.end());
-      lookup_names.insert(lookup_names.end(), video_dat_names.begin(),
-                          video_dat_names.end());
-      lookup_names.insert(lookup_names.end(), video_usm_names.begin(),
-                          video_usm_names.end());
-      lookup_names.insert(lookup_names.end(), video_crid_names.begin(),
-                          video_crid_names.end());
-      const auto found_video =
-          find_asset_candidates_in_indexes(sources.video.indexes, lookup_names);
-
-      auto video_source =
-          first_found_candidate_in_order(found_video, video_mp4_names);
-      if (!video_source.empty()) {
-        std::filesystem::copy_file(
-            video_source, track_output / "pv.mp4",
-            std::filesystem::copy_options::overwrite_existing);
-      } else {
-        video_source =
-            first_found_candidate_in_order(found_video, video_dat_names);
-        if (video_source.empty()) {
-          video_source =
-              first_found_candidate_in_order(found_video, video_usm_names);
-        }
-        if (video_source.empty()) {
-          video_source =
-              first_found_candidate_in_order(found_video, video_crid_names);
-        }
-
-        if (video_source.empty()) {
-          if (info.movie_debug_placeholder) {
-            push_warning(result.warnings,
-                         "Video missing (debug movie placeholder): " +
-                             info.name + " (" + info.id + ")");
-          } else {
-            push_warning(result.warnings,
-                         "Video missing: " + info.name + " (" + info.id + ")");
-            video_incomplete = true;
-          }
-        } else {
-          if (!convert_dat_or_usm_to_mp4(video_source,
-                                         track_output / "pv.mp4")) {
-            push_warning(
-                result.warnings,
-                with_ffmpeg_detail(
-                    "Video conversion failed: " + path_to_utf8(video_source) +
-                    " -> " + path_to_utf8(track_output / "pv.mp4")));
-            video_incomplete = true;
-          }
-        }
-      }
+      video_incomplete = export_track_video(info, media_ids, sources.video,
+                                            track_output, result.warnings);
     }
 
     if (options.dummy_assets && (export_audio || export_video)) {
