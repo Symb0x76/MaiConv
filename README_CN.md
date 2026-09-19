@@ -171,6 +171,9 @@ maiconv assets --input /path/to/StreamingAssets --output ./output --layout flat 
 - 对宴谱而言，若同一谱面目录同时存在 `*_L.ma2` 与 `*_R.ma2`，MaiConv 会拆分导出两份结果，并在目录名与 `maidata` `&title=` 追加 `(L)` / `(R)`
 - 对已拆分的宴谱，`--difficulty 7` 会同时命中 `(L)` 与 `(R)` 两份输出
 - `--resume`（`--skip-existing`）会跳过已存在完整导出的曲目；`_Incomplete` 曲目仍会继续尝试补全
+  - 每次运行都会把影响产物内容的选项（`--format`、`--display`、`--rotate`、`--shift`）记录到输出根目录的 `.maiconv-export.json`
+  - 若本次选项与已有导出不一致，`--resume` 不会跳过任何曲目并给出警告：simai 与 maidata 的产物同名为 `maidata.txt`，无法仅凭文件名区分
+  - 输出目录中没有 `.maiconv-export.json` 时视为兼容（该导出早于此检查）
 - `--types` 支持逗号分隔：
   `maidata.txt` / `track.mp3` / `bg.png` / `pv.mp4`
   （别名：`chart|ma2`、`audio|music`、`cover|jacket|bg`、`video|movie|pv`）

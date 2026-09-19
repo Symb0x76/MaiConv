@@ -163,6 +163,9 @@ Selection rules:
 - for Utage tracks, when both `*_L.ma2` and `*_R.ma2` exist in the same chart folder, MaiConv exports two outputs and appends `(L)` / `(R)` to both folder name and `maidata` `&title=`
 - `--difficulty 7` matches both `(L)` and `(R)` outputs for split Utage charts
 - `--resume` (`--skip-existing`) skips tracks that already have complete exports, while keeping `_Incomplete` tracks eligible for retry
+  - each run records its content-affecting options (`--format`, `--display`, `--rotate`, `--shift`) in `.maiconv-export.json` at the output root
+  - if those differ from the existing export, `--resume` skips nothing and warns, because a simai and a maidata export are both named `maidata.txt` and cannot be told apart by filename
+  - an output directory with no `.maiconv-export.json` predates this check and is treated as compatible
 - `--types` accepts comma-separated values:
   `maidata.txt`/`track.mp3`/`bg.png`/`pv.mp4`
   (aliases: `chart|ma2`, `audio|music`, `cover|jacket|bg`, `video|movie|pv`)

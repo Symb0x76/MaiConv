@@ -1162,6 +1162,95 @@ TEST_CASE(
   fs::remove_all(temp_root);
 }
 
+TEST_CASE("assets --resume re-exports when the previous run used a different "
+          "format") {
+  const fs::path temp_root = unique_temp_dir("assets_resume_format_change");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A030", "000666", "ResumeSong", "POPS", "PRISM",
+               {2, 3});
+
+  AssetsOptions simai_options;
+  simai_options.streaming_assets_path = assets_root;
+  simai_options.output_path = output_root;
+  simai_options.format = ChartFormat::Simai;
+  // Chart only: with media enabled the missing track.mp3 would make
+  // has_complete_track_output false on its own, so resume could never skip and
+  // the test would pass even without the manifest check.
+  simai_options.export_audio = false;
+  simai_options.export_cover = false;
+  simai_options.export_video = false;
+  REQUIRE(run_compile_assets(simai_options) == 0);
+
+  const fs::path chart = output_root / "000666_ResumeSong" / "maidata.txt";
+  REQUIRE(fs::exists(chart));
+  // Simai output carries no metadata header.
+  REQUIRE(read_text_file(chart).find("&title=") == std::string::npos);
+
+  // Both formats write a file named maidata.txt, so an existence-only resume
+  // check would skip this track and silently leave the simai body in place.
+  AssetsOptions maidata_options = simai_options;
+  maidata_options.format = ChartFormat::Maidata;
+  maidata_options.skip_existing_exports = true;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int result = run_compile_assets(maidata_options);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  REQUIRE(result == 0);
+  REQUIRE(captured_err.str().find("--resume will not skip any track") !=
+          std::string::npos);
+  // The chart was actually rewritten in the requested format.
+  REQUIRE(read_text_file(chart).find("&title=") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
+TEST_CASE("assets --resume still skips when the options are unchanged") {
+  const fs::path temp_root = unique_temp_dir("assets_resume_same_options");
+  const fs::path assets_root = temp_root / "StreamingAssets";
+  const fs::path output_root = temp_root / "output";
+
+  fs::create_directories(assets_root);
+  create_track(assets_root / "A031", "000777", "SkipSong", "POPS", "PRISM",
+               {2, 3});
+
+  AssetsOptions options;
+  options.streaming_assets_path = assets_root;
+  options.output_path = output_root;
+  options.format = ChartFormat::Maidata;
+  // Chart only, so that a complete export really is complete and resume has
+  // something it is allowed to skip.
+  options.export_audio = false;
+  options.export_cover = false;
+  options.export_video = false;
+  REQUIRE(run_compile_assets(options) == 0);
+  REQUIRE(fs::exists(output_root / "000777_SkipSong" / "maidata.txt"));
+
+  options.skip_existing_exports = true;
+
+  std::ostringstream captured_out;
+  std::ostringstream captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int result = run_compile_assets(options);
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+
+  REQUIRE(result == 0);
+  REQUIRE(captured_err.str().find("--resume will not skip any track") ==
+          std::string::npos);
+  REQUIRE(captured_out.str().find("Skipped:") != std::string::npos);
+
+  fs::remove_all(temp_root);
+}
+
 TEST_CASE("assets --ignore continues past a throwing track and still fails") {
   // Covers both the sequential loop and the worker pool: each abandons the
   // remaining queue on a fatal error unless --ignore is set.

@@ -368,12 +368,16 @@ int main(int argc, char **argv) {
   auto *ma2_cmd =
       app.add_subcommand("ma2", "Convert MA2 chart to target format");
   ma2_cmd->add_option("--input", ma2_input, "Input ma2 file path")->required();
-  ma2_cmd->add_option("--format", ma2_format_str,
-                      "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
+  ma2_cmd
+      ->add_option("--format", ma2_format_str,
+                   "simai|maidata|ma2|ma2-103|ma2-104 "
+                   "(simai-fes is accepted as an alias for simai)")
+      ->capture_default_str();
   ma2_cmd->add_option("--rotate", ma2_rotate_str,
                       "UpSideDown|Clockwise90|Clockwise180|Counterclockwise90|"
                       "Counterclockwise180|LeftToRight");
-  ma2_cmd->add_option("--shift", ma2_shift, "Shift by ticks");
+  ma2_cmd->add_option("--shift", ma2_shift, "Shift by ticks")
+      ->capture_default_str();
   ma2_cmd->add_option("--output", ma2_output, "Output path (file or folder)");
   ma2_cmd->callback([&]() {
     const auto fmt = maiconv::parse_chart_format(ma2_format_str);
@@ -404,13 +408,18 @@ int main(int argc, char **argv) {
       ->required();
   auto *simai_diff_opt =
       simai_cmd->add_option("--difficulty", simai_difficulty, "Difficulty 1..7")
-          ->check(CLI::Range(1, 7));
-  simai_cmd->add_option("--format", simai_format_str,
-                        "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
+          ->check(CLI::Range(1, 7))
+          ->capture_default_str();
+  simai_cmd
+      ->add_option("--format", simai_format_str,
+                   "simai|maidata|ma2|ma2-103|ma2-104 "
+                   "(simai-fes is accepted as an alias for simai)")
+      ->capture_default_str();
   simai_cmd->add_option("--rotate", simai_rotate_str,
                         "UpSideDown|Clockwise90|Clockwise180|"
                         "Counterclockwise90|Counterclockwise180|LeftToRight");
-  simai_cmd->add_option("--shift", simai_shift, "Shift by ticks");
+  simai_cmd->add_option("--shift", simai_shift, "Shift by ticks")
+      ->capture_default_str();
   simai_cmd->add_option("--output", simai_output,
                         "Output path (file or folder)");
   simai_cmd->callback([&]() {
@@ -449,7 +458,6 @@ int main(int argc, char **argv) {
   std::string assets_rotate_str;
   int assets_shift = 0;
   bool assets_display = false;
-  bool assets_decimal = false;
   bool assets_ignore = false;
   bool assets_dummy = false;
   bool assets_resume = false;
@@ -488,17 +496,21 @@ int main(int argc, char **argv) {
                          "Override cover folder (default: auto-detect)");
   assets_cmd->add_option("--video", assets_video,
                          "Override video folder (default: auto-detect)");
-  assets_cmd->add_option("--format", assets_format_str,
-                         "simai|simai-fes|maidata|ma2|ma2-103|ma2-104");
-  assets_cmd->add_option("--layout", assets_layout_str, "flat|genre|version");
+  assets_cmd
+      ->add_option("--format", assets_format_str,
+                   "simai|maidata|ma2|ma2-103|ma2-104 "
+                   "(simai-fes is accepted as an alias for simai)")
+      ->capture_default_str();
+  assets_cmd->add_option("--layout", assets_layout_str, "flat|genre|version")
+      ->capture_default_str();
   assets_cmd->add_flag(
       "--display", assets_display,
       "Export maidata lv_* using display levels instead of constants");
   assets_cmd->add_option("--rotate", assets_rotate_str,
                          "UpSideDown|Clockwise90|Clockwise180|"
                          "Counterclockwise90|Counterclockwise180|LeftToRight");
-  assets_cmd->add_option("--shift", assets_shift, "Shift by ticks");
-  assets_cmd->add_flag("--decimal", assets_decimal, "Use decimal levels");
+  assets_cmd->add_option("--shift", assets_shift, "Shift by ticks")
+      ->capture_default_str();
   assets_cmd->add_flag("--ignore", assets_ignore, "Ignore incomplete assets");
   assets_cmd->add_flag(
       "--dummy", assets_dummy,
@@ -517,7 +529,8 @@ int main(int argc, char **argv) {
   assets_cmd
       ->add_option("--jobs", assets_jobs,
                    "Worker count for track-level parallel export")
-      ->check(CLI::Range(1, 128));
+      ->check(CLI::Range(1, 128))
+      ->capture_default_str();
   assets_cmd->add_flag("--timing", assets_timing,
                        "Emit phase timing summary (aggregate + p95)");
   assets_cmd
@@ -525,8 +538,10 @@ int main(int argc, char **argv) {
                    "Export type filter (comma-separated): "
                    "maidata.txt|track.mp3|bg.png|pv.mp4")
       ->delimiter(',');
-  assets_cmd->add_option("--verbosity,--log-level", assets_log_level_str,
-                         "Console output level: quiet|normal|verbose");
+  assets_cmd
+      ->add_option("--verbosity,--log-level", assets_log_level_str,
+                   "Console output level: quiet|normal|verbose")
+      ->capture_default_str();
   assets_cmd->callback([&]() {
     if (assets_gpu) {
       enable_ffmpeg_gpu_mode();
@@ -585,7 +600,6 @@ int main(int argc, char **argv) {
                                      : maiconv::MaidataLevelMode::Constant;
     options.rotate = rotate;
     options.shift_ticks = assets_shift;
-    options.strict_decimal = assets_decimal;
     options.ignore_incomplete_assets = assets_ignore;
     options.dummy_assets = assets_dummy;
     options.skip_existing_exports = assets_resume;

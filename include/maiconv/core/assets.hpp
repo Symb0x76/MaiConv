@@ -49,7 +49,6 @@ struct AssetsOptions {
   std::optional<FlipMethod> rotate;
   int shift_ticks = 0;
 
-  bool strict_decimal = false;
   bool ignore_incomplete_assets = false;
   bool dummy_assets = false;
   bool skip_existing_exports = false;

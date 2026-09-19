@@ -437,6 +437,57 @@ bool has_complete_track_output(const std::filesystem::path &track_output,
   return false;
 }
 
+// Written at the output root so that --resume can tell whether an earlier
+// export used options that produce different file contents. Filenames alone
+// cannot: a simai export and a maidata export are both "maidata.txt", and
+// --display, --rotate and --shift change the contents without changing any
+// name.
+constexpr const char *kExportManifestName = ".maiconv-export.json";
+
+// Only the options that change the CONTENT of an exported file belong here.
+// --layout and --number are excluded because they change the output path
+// instead, and the per-type export flags are excluded because
+// has_complete_track_output already checks for each expected file.
+std::string export_manifest_document(const AssetsOptions &options) {
+  // simai-fes is an accepted alias for simai and produces identical output,
+  // so normalize it to avoid a spurious mismatch between the two spellings.
+  const ChartFormat format = options.format == ChartFormat::SimaiFes
+                                 ? ChartFormat::Simai
+                                 : options.format;
+  std::string out = "{\n";
+  out += "  \"format\": \"" + to_string(format) + "\",\n";
+  out += "  \"levelMode\": \"";
+  out += options.maidata_level_mode == MaidataLevelMode::Display ? "display"
+                                                                 : "constant";
+  out += "\",\n";
+  out += "  \"rotate\": \"";
+  out += options.rotate.has_value() ? to_string(*options.rotate) : "none";
+  out += "\",\n";
+  out += "  \"shiftTicks\": " + std::to_string(options.shift_ticks) + "\n";
+  out += "}\n";
+  return out;
+}
+
+// The document is generated deterministically, so an exact comparison stands
+// in for parsing it back. Any deviation -- including a hand-edited file --
+// counts as a conflict, which errs toward re-exporting rather than skipping.
+//
+// A missing manifest means the export predates this check and is treated as
+// compatible, so existing --resume workflows keep working. Every run writes
+// the manifest, so this self-heals after one pass.
+bool export_manifest_conflicts(const AssetsOptions &options) {
+  const auto manifest_path = options.output_path / kExportManifestName;
+  std::error_code ec;
+  if (!std::filesystem::exists(manifest_path, ec) || ec) {
+    return false;
+  }
+  try {
+    return read_text_file(manifest_path) != export_manifest_document(options);
+  } catch (const std::exception &) {
+    return true;
+  }
+}
+
 void emit_track_output(const TrackInfo &info,
                        const std::filesystem::path &output_path,
                        bool incomplete, bool skipped_existing,
@@ -538,10 +589,9 @@ bool zip_and_remove(const std::filesystem::path &folder) {
 }
 
 std::string compose_simai_document(const TrackInfo &info,
-                                   const std::map<int, std::string> &inotes,
-                                   bool strict_decimal) {
+                                   const std::map<int, std::string> &inotes) {
+  // Simai output carries no metadata header, only the chart bodies.
   (void)info;
-  (void)strict_decimal;
   std::string out;
   std::size_t reserve_size = 0;
   for (const auto &[diff, body] : inotes) {
@@ -560,10 +610,8 @@ std::string compose_simai_document(const TrackInfo &info,
 
 std::string compose_maidata_document(const TrackInfo &info,
                                      const std::map<int, std::string> &inotes,
-                                     bool strict_decimal,
                                      MaidataLevelMode level_mode,
                                      UtagePlayerSide utage_side) {
-  (void)strict_decimal;
   const std::string title = export_display_title(info, utage_side);
   const std::string artist = normalize_maidata_metadata_value(info.composer);
   std::string genre = normalize_maidata_metadata_value(info.genre);
@@ -1112,10 +1160,9 @@ TrackProcessResult process_track_folder(
       const auto write_begin = std::chrono::steady_clock::now();
       const std::string payload =
           (options.format == ChartFormat::Maidata)
-              ? compose_maidata_document(info, inotes, options.strict_decimal,
-                                         options.maidata_level_mode,
-                                         forced_utage_side)
-              : compose_simai_document(info, inotes, options.strict_decimal);
+              ? compose_maidata_document(
+                    info, inotes, options.maidata_level_mode, forced_utage_side)
+              : compose_simai_document(info, inotes);
       write_text_file(track_output / "maidata.txt", payload);
       write_duration += std::chrono::steady_clock::now() - write_begin;
     }
@@ -1513,7 +1560,10 @@ TrackProcessResult process_track_folder(
 
 } // namespace
 
-int run_compile_assets(const AssetsOptions &options) {
+int run_compile_assets(const AssetsOptions &requested_options) {
+  // Local copy so that a manifest conflict can disable --resume for this run
+  // without threading another parameter through process_track_folder.
+  AssetsOptions options = requested_options;
   try {
     if (options.streaming_assets_path.empty() || options.output_path.empty()) {
       throw std::runtime_error("input path and output path are required");
@@ -1528,6 +1578,13 @@ int run_compile_assets(const AssetsOptions &options) {
     if (!options.export_chart && !options.export_audio &&
         !options.export_cover && !options.export_video) {
       throw std::runtime_error("at least one export target must be enabled");
+    }
+    if (options.skip_existing_exports && export_manifest_conflicts(options)) {
+      options.skip_existing_exports = false;
+      std::cerr << "Warning: the existing export in "
+                << path_to_utf8(options.output_path)
+                << " was produced with different options; --resume will not "
+                   "skip any track.\n";
     }
 
     std::filesystem::create_directories(options.output_path);
@@ -1899,6 +1956,18 @@ int run_compile_assets(const AssetsOptions &options) {
     }
     if (timing_enabled) {
       emit_timing_summary(timing);
+    }
+
+    // Record the options this export used so a later --resume can tell whether
+    // its own options would produce different contents. Written even when some
+    // tracks failed, because it describes the run rather than its success.
+    {
+      std::error_code manifest_ec;
+      if (std::filesystem::exists(options.output_path, manifest_ec) &&
+          !manifest_ec) {
+        write_text_file(options.output_path / kExportManifestName,
+                        export_manifest_document(options));
+      }
     }
 
     if (!fatal_errors.empty()) {
