@@ -721,6 +721,10 @@ TEST_CASE("assets timing output can be enabled explicitly") {
   REQUIRE(err.find("Timing summary (ms):") != std::string::npos);
   REQUIRE(err.find("source_scan:") != std::string::npos);
   REQUIRE(err.find("index_build:") != std::string::npos);
+  // Phases are only printed once they have samples, so this also guards the
+  // chart loop's scoped timer against silently stopping to record.
+  REQUIRE(err.find("ma2_parse_compose:") != std::string::npos);
+  REQUIRE(err.find("xml_parse:") != std::string::npos);
 
   fs::remove_all(temp_root);
 }

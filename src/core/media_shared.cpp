@@ -241,24 +241,6 @@ std::filesystem::path make_temp_work_dir() {
   return temp_workspace_pool().make_workspace();
 }
 
-[[maybe_unused]] std::string path_to_utf8(const std::filesystem::path &path) {
-#if defined(_WIN32)
-#if defined(__cpp_char8_t)
-  const std::u8string value = path.u8string();
-  std::string out;
-  out.reserve(value.size());
-  for (const char8_t ch : value) {
-    out.push_back(static_cast<char>(ch));
-  }
-  return out;
-#else
-  return path.u8string();
-#endif
-#else
-  return path.string();
-#endif
-}
-
 std::optional<std::string> read_non_empty_env(const char *name) {
 #if defined(_WIN32)
   char *value = nullptr;
@@ -2562,10 +2544,6 @@ std::vector<std::string> media_shared_resolve_ffmpeg_mp3_encoders() {
 
 void media_shared_remove_file_if_exists(const std::filesystem::path &path) {
   remove_file_if_exists(path);
-}
-
-std::string media_shared_path_to_utf8(const std::filesystem::path &path) {
-  return path_to_utf8(path);
 }
 
 #if defined(_WIN32)

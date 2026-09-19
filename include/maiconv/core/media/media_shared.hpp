@@ -32,7 +32,6 @@ bool media_shared_write_embedded_png(const std::filesystem::path &source,
 
 std::vector<std::string> media_shared_resolve_ffmpeg_mp3_encoders();
 void media_shared_remove_file_if_exists(const std::filesystem::path &path);
-std::string media_shared_path_to_utf8(const std::filesystem::path &path);
 
 std::vector<std::string> media_shared_resolve_ffmpeg_h264_encoders();
 std::vector<std::string> media_shared_resolve_ffmpeg_vp9_encoders();

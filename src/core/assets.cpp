@@ -1,5 +1,6 @@
 #include "maiconv/core/assets.hpp"
 #include "maiconv/core/assets_internal.hpp"
+#include "maiconv/core/assets_timing.hpp"
 
 #include "maiconv/core/chart.hpp"
 #include "maiconv/core/io.hpp"
@@ -692,68 +693,6 @@ std::string compose_maidata_document(const TrackInfo &info,
   return out;
 }
 
-struct PhaseTiming {
-  std::vector<double> samples_ms;
-  double total_ms = 0.0;
-
-  void add(std::chrono::steady_clock::duration duration) {
-    const auto us =
-        std::chrono::duration_cast<std::chrono::microseconds>(duration);
-    const double ms = static_cast<double>(us.count()) / 1000.0;
-    total_ms += ms;
-    samples_ms.push_back(ms);
-  }
-
-  void merge(const PhaseTiming &other) {
-    total_ms += other.total_ms;
-    samples_ms.insert(samples_ms.end(), other.samples_ms.begin(),
-                      other.samples_ms.end());
-  }
-
-  [[nodiscard]] double avg_ms() const {
-    if (samples_ms.empty()) {
-      return 0.0;
-    }
-    return total_ms / static_cast<double>(samples_ms.size());
-  }
-
-  [[nodiscard]] double p95_ms() const {
-    if (samples_ms.empty()) {
-      return 0.0;
-    }
-    std::vector<double> sorted = samples_ms;
-    std::sort(sorted.begin(), sorted.end());
-    const std::size_t idx = (sorted.size() - 1) * 95 / 100;
-    return sorted[idx];
-  }
-};
-
-struct AssetsTimingSummary {
-  PhaseTiming source_scan;
-  PhaseTiming index_build;
-  PhaseTiming xml_parse;
-  PhaseTiming ma2_parse_compose;
-  PhaseTiming media;
-  PhaseTiming write_zip;
-  std::size_t metadata_cache_hits = 0;
-  std::size_t metadata_cache_misses = 0;
-  std::size_t asset_index_cache_hits = 0;
-  std::size_t asset_index_cache_misses = 0;
-
-  void merge(const AssetsTimingSummary &other) {
-    source_scan.merge(other.source_scan);
-    index_build.merge(other.index_build);
-    xml_parse.merge(other.xml_parse);
-    ma2_parse_compose.merge(other.ma2_parse_compose);
-    media.merge(other.media);
-    write_zip.merge(other.write_zip);
-    metadata_cache_hits += other.metadata_cache_hits;
-    metadata_cache_misses += other.metadata_cache_misses;
-    asset_index_cache_hits += other.asset_index_cache_hits;
-    asset_index_cache_misses += other.asset_index_cache_misses;
-  }
-};
-
 void emit_timing_summary(const AssetsTimingSummary &timing) {
   const auto has_samples = [](const PhaseTiming &phase) {
     return !phase.samples_ms.empty();
@@ -1118,7 +1057,7 @@ TrackProcessResult process_track_folder(
     for (const auto &selected_chart : selected_charts) {
       const auto &ma2_file = selected_chart.ma2_file;
       const int output_difficulty = selected_chart.output_difficulty;
-      const auto ma2_begin = std::chrono::steady_clock::now();
+      ScopedDuration ma2_timer(ma2_duration);
       const auto chart = parser.parse(tokenizer.tokenize_file(ma2_file));
       Chart transformed = chart;
       if (options.rotate.has_value()) {
@@ -1131,7 +1070,6 @@ TrackProcessResult process_track_folder(
           longest_chart_seconds, estimate_chart_duration_seconds(transformed));
 
       if (!export_chart) {
-        ma2_duration += std::chrono::steady_clock::now() - ma2_begin;
         continue;
       }
 
@@ -1139,32 +1077,30 @@ TrackProcessResult process_track_folder(
           options.format == ChartFormat::SimaiFes ||
           options.format == ChartFormat::Maidata) {
         if (info.is_utage && inotes.find(output_difficulty) != inotes.end()) {
-          ma2_duration += std::chrono::steady_clock::now() - ma2_begin;
           continue;
         }
         inotes[output_difficulty] = simai_composer.compile_chart(transformed);
-        ma2_duration += std::chrono::steady_clock::now() - ma2_begin;
       } else {
         const std::string text =
             ma2_composer.compose(transformed, options.format);
-        ma2_duration += std::chrono::steady_clock::now() - ma2_begin;
-        const auto write_begin = std::chrono::steady_clock::now();
+        // The write is measured separately, so stop the parse/compose clock
+        // before it rather than letting the destructor cover both.
+        ma2_timer.stop();
+        ScopedDuration write_timer(write_duration);
         write_text_file(track_output / "result.ma2", text);
-        write_duration += std::chrono::steady_clock::now() - write_begin;
       }
     }
     result.timing.ma2_parse_compose.add(ma2_duration);
 
     if (export_chart &&
         (options.format == ChartFormat::Maidata || !inotes.empty())) {
-      const auto write_begin = std::chrono::steady_clock::now();
+      ScopedDuration write_timer(write_duration);
       const std::string payload =
           (options.format == ChartFormat::Maidata)
               ? compose_maidata_document(
                     info, inotes, options.maidata_level_mode, forced_utage_side)
               : compose_simai_document(info, inotes);
       write_text_file(track_output / "maidata.txt", payload);
-      write_duration += std::chrono::steady_clock::now() - write_begin;
     }
     if (write_duration != std::chrono::steady_clock::duration::zero()) {
       result.timing.write_zip.add(write_duration);

@@ -22,6 +22,9 @@ double to_double(std::string_view value, double fallback = 0.0);
 std::string pad_music_id(const std::string &id, std::size_t width = 6);
 std::string sanitize_folder_name(const std::string &name);
 std::filesystem::path path_from_utf8(std::string_view utf8);
+// Canonical path -> UTF-8 conversion. On Windows this is NOT path.string(),
+// which would apply the active code page and mangle non-ASCII titles.
+std::string path_to_utf8(const std::filesystem::path &path);
 std::filesystem::path append_utf8_path(const std::filesystem::path &base,
                                        std::string_view leaf_utf8);
 

@@ -1,5 +1,6 @@
 #include "maiconv/core/media/media_audio.hpp"
 
+#include "maiconv/core/io.hpp"
 #include "maiconv/core/media/media_shared.hpp"
 
 #include <array>
@@ -163,7 +164,7 @@ bool generate_silent_mp3(const std::filesystem::path &target_mp3,
     args.insert(args.end(), {"-f", "lavfi", "-i",
                              "anullsrc=channel_layout=stereo:sample_rate=44100",
                              "-t", duration_arg, "-vn", "-c:a", encoder,
-                             media_shared_path_to_utf8(target_mp3)});
+                             path_to_utf8(target_mp3)});
     const bool ok = media_shared_run_ffmpeg_process(args);
 #endif
     if (ok && media_shared_file_non_empty(target_mp3)) {

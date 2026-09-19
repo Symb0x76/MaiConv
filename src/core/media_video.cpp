@@ -403,7 +403,7 @@ bool fallback_ffmpeg_vp9_to_h264(const std::vector<uint8_t> &vp9_ivf,
     media_shared_append_hwaccel_arg(args);
     args.insert(args.end(),
                 {"-f", "ivf", "-i", "pipe:0", "-an", "-c:v", encoder,
-                 "-pix_fmt", "yuv420p", media_shared_path_to_utf8(target_mp4)});
+                 "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
     const bool ok = media_shared_run_ffmpeg_feed_stdin(args, vp9_ivf);
 #endif
     if (ok && media_shared_file_non_empty(target_mp4)) {
@@ -439,8 +439,8 @@ bool transcode_mp4_to_vp9_ivf_bytes(const std::filesystem::path &source_mp4,
 #else
     std::vector<std::string> args = {"-y", "-loglevel", "error"};
     media_shared_append_hwaccel_arg(args);
-    args.insert(args.end(), {"-i", media_shared_path_to_utf8(source_mp4), "-an",
-                             "-c:v", encoder, "-f", "ivf", "pipe:1"});
+    args.insert(args.end(), {"-i", path_to_utf8(source_mp4), "-an", "-c:v",
+                             encoder, "-f", "ivf", "pipe:1"});
     const bool ok = media_shared_run_ffmpeg_capture_stdout(args, target_ivf);
 #endif
     if (ok && is_vp9_ivf_stream(target_ivf)) {
@@ -546,9 +546,8 @@ bool remux_extracted_stream_to_mp4(const std::filesystem::path &stream_file,
   const bool ok = media_shared_run_ffmpeg_process(args);
 #else
   std::vector<std::string> args = {"-y", "-loglevel", "error"};
-  args.insert(args.end(),
-              {"-i", media_shared_path_to_utf8(stream_file), "-an", "-c:v",
-               "copy", media_shared_path_to_utf8(target_mp4)});
+  args.insert(args.end(), {"-i", path_to_utf8(stream_file), "-an", "-c:v",
+                           "copy", path_to_utf8(target_mp4)});
   const bool ok = media_shared_run_ffmpeg_process(args);
 #endif
   return ok && media_shared_file_non_empty(target_mp4);
@@ -581,9 +580,9 @@ bool transcode_extracted_stream_to_h264_mp4(
 #else
     std::vector<std::string> args = {"-y", "-loglevel", "error"};
     media_shared_append_hwaccel_arg(args);
-    args.insert(args.end(), {"-i", media_shared_path_to_utf8(stream_file),
-                             "-an", "-c:v", encoder, "-pix_fmt", "yuv420p",
-                             media_shared_path_to_utf8(target_mp4)});
+    args.insert(args.end(),
+                {"-i", path_to_utf8(stream_file), "-an", "-c:v", encoder,
+                 "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
     const bool ok = media_shared_run_ffmpeg_process(args);
 #endif
     if (ok && media_shared_file_non_empty(target_mp4)) {
@@ -650,9 +649,8 @@ bool convert_dat_or_usm_to_mp4(const std::filesystem::path &source,
 #else
     std::vector<std::string> args = {"-y", "-loglevel", "error"};
     media_shared_append_hwaccel_arg(args);
-    args.insert(args.end(), {"-i", media_shared_path_to_utf8(source), "-an",
-                             "-c:v", encoder, "-pix_fmt", "yuv420p",
-                             media_shared_path_to_utf8(target_mp4)});
+    args.insert(args.end(), {"-i", path_to_utf8(source), "-an", "-c:v", encoder,
+                             "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
     const bool fallback_ok = media_shared_run_ffmpeg_process(args);
 #endif
     if (fallback_ok && media_shared_file_non_empty(target_mp4)) {
@@ -691,10 +689,9 @@ bool generate_single_frame_mp4_from_image(
 #else
     std::vector<std::string> args = {"-y", "-loglevel", "error"};
     media_shared_append_hwaccel_arg(args);
-    args.insert(args.end(),
-                {"-loop", "1", "-i", media_shared_path_to_utf8(source_image),
-                 "-frames:v", "1", "-an", "-c:v", encoder, "-pix_fmt",
-                 "yuv420p", media_shared_path_to_utf8(target_mp4)});
+    args.insert(args.end(), {"-loop", "1", "-i", path_to_utf8(source_image),
+                             "-frames:v", "1", "-an", "-c:v", encoder,
+                             "-pix_fmt", "yuv420p", path_to_utf8(target_mp4)});
     const bool ok = media_shared_run_ffmpeg_process(args);
 #endif
     if (ok && media_shared_file_non_empty(target_mp4)) {
@@ -732,7 +729,7 @@ bool generate_single_frame_black_mp4(const std::filesystem::path &target_mp4) {
     args.insert(args.end(),
                 {"-f", "lavfi", "-i", "color=c=black:s=1280x720:r=1",
                  "-frames:v", "1", "-an", "-c:v", encoder, "-pix_fmt",
-                 "yuv420p", media_shared_path_to_utf8(target_mp4)});
+                 "yuv420p", path_to_utf8(target_mp4)});
     const bool ok = media_shared_run_ffmpeg_process(args);
 #endif
     if (ok && media_shared_file_non_empty(target_mp4)) {

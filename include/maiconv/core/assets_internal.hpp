@@ -2,6 +2,7 @@
 // Internal to MaiConv_core asset compile. NOT the public assets.hpp.
 
 #include "maiconv/core/assets.hpp"
+#include "maiconv/core/io.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -84,24 +85,6 @@ struct VersionFilterSet {
 };
 
 using AssetIndex = std::unordered_map<std::string, std::filesystem::path>;
-
-inline std::string path_to_utf8(const std::filesystem::path &path) {
-#if defined(_WIN32)
-#if defined(__cpp_char8_t)
-  const auto value = path.u8string();
-  std::string out;
-  out.reserve(value.size());
-  for (const auto ch : value) {
-    out.push_back(static_cast<char>(ch));
-  }
-  return out;
-#else
-  return path.u8string();
-#endif
-#else
-  return path.string();
-#endif
-}
 
 inline std::string path_to_generic_utf8(const std::filesystem::path &path) {
 #if defined(_WIN32)

@@ -7,9 +7,8 @@
 #include <system_error>
 
 namespace maiconv {
-namespace {
 
-std::string path_to_utf8_for_error(const std::filesystem::path &path) {
+std::string path_to_utf8(const std::filesystem::path &path) {
 #if defined(_WIN32)
 #if defined(__cpp_char8_t)
   const std::u8string value = path.u8string();
@@ -27,13 +26,10 @@ std::string path_to_utf8_for_error(const std::filesystem::path &path) {
 #endif
 }
 
-} // namespace
-
 std::string read_text_file(const std::filesystem::path &path) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) {
-    throw std::runtime_error("cannot open file: " +
-                             path_to_utf8_for_error(path));
+    throw std::runtime_error("cannot open file: " + path_to_utf8(path));
   }
   return std::string(std::istreambuf_iterator<char>(stream),
                      std::istreambuf_iterator<char>());
@@ -42,8 +38,7 @@ std::string read_text_file(const std::filesystem::path &path) {
 std::vector<std::string> read_lines(const std::filesystem::path &path) {
   std::ifstream stream(path);
   if (!stream) {
-    throw std::runtime_error("cannot open file: " +
-                             path_to_utf8_for_error(path));
+    throw std::runtime_error("cannot open file: " + path_to_utf8(path));
   }
   std::vector<std::string> lines;
   for (std::string line; std::getline(stream, line);) {
@@ -62,8 +57,7 @@ void write_text_file(const std::filesystem::path &path,
   }
   std::ofstream stream(path, std::ios::binary | std::ios::trunc);
   if (!stream) {
-    throw std::runtime_error("cannot write file: " +
-                             path_to_utf8_for_error(path));
+    throw std::runtime_error("cannot write file: " + path_to_utf8(path));
   }
   stream.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
