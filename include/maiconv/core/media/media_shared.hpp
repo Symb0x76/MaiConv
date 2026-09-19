@@ -9,6 +9,14 @@
 
 namespace maiconv {
 
+// Why ffmpeg invocations on the CALLING THREAD failed since the last drain,
+// joined into one line, or empty when none did. A failed invocation is not by
+// itself an error -- the video path tries a stream copy before falling back to
+// a transcode -- so these are reported only by whoever decides the overall
+// conversion failed. Draining clears the log.
+std::string media_shared_take_ffmpeg_failures();
+void media_shared_clear_ffmpeg_failures();
+
 bool media_shared_file_non_empty(const std::filesystem::path &path);
 std::string media_shared_lower(const std::string &s);
 std::filesystem::path media_shared_make_temp_work_dir();

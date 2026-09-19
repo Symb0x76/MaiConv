@@ -41,6 +41,48 @@ extern char **environ;
 namespace maiconv {
 namespace {
 
+// Why the last ffmpeg invocations on THIS thread failed.
+//
+// A failed invocation is not by itself an error: the video path deliberately
+// attempts a stream copy first and falls back to a transcode, so printing
+// every failure would be noise. Reasons are therefore accumulated per thread
+// (the export runs a worker pool) and surfaced only by whoever decides the
+// overall conversion failed.
+//
+// Failing to START ffmpeg is different -- it is never part of a fallback
+// chain -- so that one is also reported immediately.
+std::vector<std::string> &ffmpeg_failure_log() {
+  static thread_local std::vector<std::string> failures;
+  return failures;
+}
+
+void record_ffmpeg_exit_failure(const std::string &detail) {
+  auto &log = ffmpeg_failure_log();
+  // The encoder fallback retries the same invocation shape with a different
+  // encoder, so the identical reason arrives several times in a row. Record
+  // each distinct reason once; repetition carries no extra information.
+  if (std::find(log.begin(), log.end(), detail) != log.end()) {
+    return;
+  }
+  // Bound the log: a fallback chain is a handful of attempts, not hundreds.
+  if (log.size() < 16) {
+    log.push_back(detail);
+  }
+}
+
+void record_ffmpeg_spawn_failure(const std::string &detail) {
+  const bool first_time =
+      std::find(ffmpeg_failure_log().begin(), ffmpeg_failure_log().end(),
+                detail) == ffmpeg_failure_log().end();
+  record_ffmpeg_exit_failure(detail);
+  // Being unable to start ffmpeg at all is worth saying out loud even if the
+  // caller never drains the log, but say it once per drain window rather than
+  // once per fallback attempt.
+  if (first_time) {
+    std::cerr << "ffmpeg could not be started: " << detail << "\n";
+  }
+}
+
 constexpr std::array<uint8_t, 16> kAcbStubMagic = {
     static_cast<uint8_t>('M'), static_cast<uint8_t>('A'),
     static_cast<uint8_t>('I'), static_cast<uint8_t>('C'),
@@ -352,6 +394,7 @@ std::vector<std::string> resolve_ffmpeg_mp3_encoders() {
   append_unique_string(encoders, "libmp3lame");
   append_unique_string(encoders, "mp3");
   append_unique_string(encoders, "libshine");
+
 #if defined(_WIN32)
   append_unique_string(encoders, "mp3_mf");
 #endif
@@ -491,6 +534,11 @@ std::wstring build_windows_command_line(const std::vector<std::wstring> &args) {
   return command_line;
 }
 
+std::string spawn_failure_detail(DWORD error_code) {
+  return "CreateProcessW failed (Windows error " + std::to_string(error_code) +
+         ")";
+}
+
 bool wait_process_success(HANDLE process_handle, HANDLE thread_handle) {
   const DWORD wait_rc = WaitForSingleObject(process_handle, INFINITE);
   DWORD exit_code = 1;
@@ -500,7 +548,22 @@ bool wait_process_success(HANDLE process_handle, HANDLE thread_handle) {
 
   CloseHandle(thread_handle);
   CloseHandle(process_handle);
-  return wait_rc == WAIT_OBJECT_0 && exit_code == 0;
+
+  if (wait_rc != WAIT_OBJECT_0) {
+    record_ffmpeg_exit_failure("wait on ffmpeg failed (WaitForSingleObject=" +
+                               std::to_string(wait_rc) + ")");
+    return false;
+  }
+  if (exit_code != 0) {
+    // ffmpeg reports its own negative AVERROR values, which surface here as a
+    // large unsigned DWORD. Include hex so the value is recognizable.
+    std::ostringstream detail;
+    detail << "ffmpeg exited with code " << exit_code << " (0x" << std::hex
+           << std::uppercase << exit_code << ")";
+    record_ffmpeg_exit_failure(detail.str());
+    return false;
+  }
+  return true;
 }
 
 // Directory of the running executable, then PATH. Deliberately omits the
@@ -594,7 +657,9 @@ run_ffmpeg_process(const std::vector<std::wstring> &args) {
   const BOOL created = CreateProcessW(nullptr, mutable_command_line.data(),
                                       nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
                                       nullptr, nullptr, &startup, &process);
+  const DWORD spawn_error = created ? 0U : GetLastError();
   if (!created) {
+    record_ffmpeg_spawn_failure(spawn_failure_detail(spawn_error));
     return false;
   }
 
@@ -660,11 +725,13 @@ bool run_ffmpeg_capture_stdout(const std::vector<std::wstring> &args,
                                       nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
                                       nullptr, nullptr, &startup, &process);
 
+  const DWORD spawn_error = created ? 0U : GetLastError();
   CloseHandle(out_write);
   CloseHandle(in_null);
   CloseHandle(err_null);
 
   if (!created) {
+    record_ffmpeg_spawn_failure(spawn_failure_detail(spawn_error));
     CloseHandle(out_read);
     return false;
   }
@@ -741,11 +808,13 @@ bool run_ffmpeg_feed_stdin(const std::vector<std::wstring> &args,
                                       nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
                                       nullptr, nullptr, &startup, &process);
 
+  const DWORD spawn_error = created ? 0U : GetLastError();
   CloseHandle(in_read);
   CloseHandle(out_null);
   CloseHandle(err_null);
 
   if (!created) {
+    record_ffmpeg_spawn_failure(spawn_failure_detail(spawn_error));
     CloseHandle(in_write);
     return false;
   }
@@ -772,6 +841,33 @@ bool run_ffmpeg_feed_stdin(const std::vector<std::wstring> &args,
   return write_ok && run_ok;
 }
 #else
+std::string posix_spawn_failure_detail(int spawn_rc) {
+  return "posix_spawn failed (errno " + std::to_string(spawn_rc) + ": " +
+         std::strerror(spawn_rc) + ")";
+}
+
+// Distinguishes the ways a child can end. A kill by signal is called out
+// separately because that is what an out-of-memory kill looks like, and it is
+// otherwise indistinguishable from an ordinary non-zero exit.
+bool posix_wait_success(int status) {
+  if (WIFSIGNALED(status)) {
+    record_ffmpeg_exit_failure("ffmpeg killed by signal " +
+                               std::to_string(WTERMSIG(status)));
+    return false;
+  }
+  if (!WIFEXITED(status)) {
+    record_ffmpeg_exit_failure("ffmpeg terminated abnormally");
+    return false;
+  }
+  const int code = WEXITSTATUS(status);
+  if (code != 0) {
+    record_ffmpeg_exit_failure("ffmpeg exited with code " +
+                               std::to_string(code));
+    return false;
+  }
+  return true;
+}
+
 std::string resolve_ffmpeg_executable() {
   static std::once_flag once;
   static std::string cached;
@@ -813,6 +909,7 @@ std::string resolve_ffmpeg_executable() {
                            : posix_spawnp(&pid, executable.c_str(), nullptr,
                                           nullptr, argv.data(), ::environ);
   if (spawn_rc != 0) {
+    record_ffmpeg_spawn_failure(posix_spawn_failure_detail(spawn_rc));
     return false;
   }
 
@@ -822,10 +919,12 @@ std::string resolve_ffmpeg_executable() {
     wait_rc = waitpid(pid, &status, 0);
   } while (wait_rc == -1 && errno == EINTR);
   if (wait_rc == -1) {
+    record_ffmpeg_exit_failure("waitpid on ffmpeg failed (errno " +
+                               std::to_string(errno) + ")");
     return false;
   }
 
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  return posix_wait_success(status);
 }
 
 bool run_ffmpeg_capture_stdout(const std::vector<std::string> &args,
@@ -890,6 +989,7 @@ bool run_ffmpeg_capture_stdout(const std::vector<std::string> &args,
   close(out_pipe[1]);
 
   if (spawn_rc != 0) {
+    record_ffmpeg_spawn_failure(posix_spawn_failure_detail(spawn_rc));
     close(out_pipe[0]);
     return false;
   }
@@ -918,10 +1018,12 @@ bool run_ffmpeg_capture_stdout(const std::vector<std::string> &args,
     wait_rc = waitpid(pid, &status, 0);
   } while (wait_rc == -1 && errno == EINTR);
   if (wait_rc == -1) {
+    record_ffmpeg_exit_failure("waitpid on ffmpeg failed (errno " +
+                               std::to_string(errno) + ")");
     return false;
   }
 
-  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+  return posix_wait_success(status);
 }
 
 bool run_ffmpeg_feed_stdin(const std::vector<std::string> &args,
@@ -985,6 +1087,7 @@ bool run_ffmpeg_feed_stdin(const std::vector<std::string> &args,
   close(err_null);
 
   if (spawn_rc != 0) {
+    record_ffmpeg_spawn_failure(posix_spawn_failure_detail(spawn_rc));
     close(in_pipe[1]);
     return false;
   }
@@ -1018,6 +1121,8 @@ bool run_ffmpeg_feed_stdin(const std::vector<std::string> &args,
     wait_rc = waitpid(pid, &status, 0);
   } while (wait_rc == -1 && errno == EINTR);
   if (wait_rc == -1) {
+    record_ffmpeg_exit_failure("waitpid on ffmpeg failed (errno " +
+                               std::to_string(errno) + ")");
     return false;
   }
 
@@ -2548,6 +2653,24 @@ bool media_shared_file_non_empty(const std::filesystem::path &path) {
 }
 
 std::string media_shared_lower(const std::string &s) { return lower(s); }
+
+std::string media_shared_take_ffmpeg_failures() {
+  auto &log = ffmpeg_failure_log();
+  if (log.empty()) {
+    return "";
+  }
+  std::string joined;
+  for (const auto &entry : log) {
+    if (!joined.empty()) {
+      joined += "; ";
+    }
+    joined += entry;
+  }
+  log.clear();
+  return joined;
+}
+
+void media_shared_clear_ffmpeg_failures() { ffmpeg_failure_log().clear(); }
 
 std::filesystem::path media_shared_make_temp_work_dir() {
   return make_temp_work_dir();

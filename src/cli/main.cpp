@@ -3,6 +3,7 @@
 #include "maiconv/core/ma2.hpp"
 #include "maiconv/core/media/media_audio.hpp"
 #include "maiconv/core/media/media_cover.hpp"
+#include "maiconv/core/media/media_shared.hpp"
 #include "maiconv/core/media/media_video.hpp"
 #include "maiconv/core/simai/compiler.hpp"
 #include "maiconv/core/simai/parser.hpp"
@@ -37,6 +38,16 @@ template <typename Fn> int run_and_report(Fn &&fn) {
     std::cerr << "Program cannot proceed because of an unknown error\n";
     return kFailure;
   }
+}
+
+// Appends why ffmpeg failed, when ffmpeg is what failed. Keeps the one-line
+// CLI error actionable instead of reporting only that a conversion "failed".
+std::string with_ffmpeg_detail(std::string message) {
+  const std::string detail = maiconv::media_shared_take_ffmpeg_failures();
+  if (!detail.empty()) {
+    message += "\n" + detail;
+  }
+  return message;
 }
 
 std::filesystem::path
@@ -198,8 +209,9 @@ int run_media_audio_to_mp3(const std::filesystem::path &acb,
   return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "track.mp3");
     if (!maiconv::convert_acb_awb_to_mp3(acb, awb, target)) {
-      throw std::runtime_error("Audio conversion failed: " + acb.string() +
-                               " + " + awb.string() + " -> " + target.string());
+      throw std::runtime_error(
+          with_ffmpeg_detail("Audio conversion failed: " + acb.string() +
+                             " + " + awb.string() + " -> " + target.string()));
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
@@ -211,8 +223,9 @@ int run_media_audio_file_to_mp3(const std::filesystem::path &input_audio,
   return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "track.mp3");
     if (!maiconv::convert_audio_to_mp3(input_audio, target)) {
-      throw std::runtime_error("Audio conversion failed: " +
-                               input_audio.string() + " -> " + target.string());
+      throw std::runtime_error(with_ffmpeg_detail(
+          "Audio conversion failed: " + input_audio.string() + " -> " +
+          target.string()));
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
@@ -233,9 +246,9 @@ int run_media_mp3_to_acb_awb(const std::filesystem::path &input_mp3,
     }
 
     if (!maiconv::convert_mp3_to_acb_awb(input_mp3, target_acb, target_awb)) {
-      throw std::runtime_error(
+      throw std::runtime_error(with_ffmpeg_detail(
           "Audio conversion failed: " + input_mp3.string() + " -> " +
-          target_acb.string() + " + " + target_awb.string());
+          target_acb.string() + " + " + target_awb.string()));
     }
 
     std::cout << "Successfully converted at:\n"
@@ -250,8 +263,9 @@ int run_media_cover_to_png(const std::filesystem::path &input_ab,
   return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "bg.png");
     if (!maiconv::convert_ab_to_png(input_ab, target)) {
-      throw std::runtime_error("Cover conversion failed: " + input_ab.string() +
-                               " -> " + target.string());
+      throw std::runtime_error(
+          with_ffmpeg_detail("Cover conversion failed: " + input_ab.string() +
+                             " -> " + target.string()));
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
@@ -274,8 +288,9 @@ int run_media_video_to_mp4(const std::filesystem::path &input_video,
   return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "pv.mp4");
     if (!maiconv::convert_dat_or_usm_to_mp4(input_video, target)) {
-      throw std::runtime_error("Video conversion failed: " +
-                               input_video.string() + " -> " + target.string());
+      throw std::runtime_error(with_ffmpeg_detail(
+          "Video conversion failed: " + input_video.string() + " -> " +
+          target.string()));
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;
@@ -287,9 +302,9 @@ int run_media_video_to_dat(const std::filesystem::path &input_mp4,
   return run_and_report([&]() {
     const auto target = resolve_binary_output_path(output, "pv.dat");
     if (!maiconv::convert_mp4_to_dat(input_mp4, target)) {
-      throw std::runtime_error(
+      throw std::runtime_error(with_ffmpeg_detail(
           "Video conversion failed: " + input_mp4.string() + " -> " +
-          target.string() + " (requires ffmpeg with VP9 encoder in PATH)");
+          target.string() + " (requires ffmpeg with VP9 encoder in PATH)"));
     }
     std::cout << "Successfully converted at: " << target.string() << "\n";
     return kSuccess;

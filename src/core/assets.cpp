@@ -7,6 +7,7 @@
 #include "maiconv/core/ma2.hpp"
 #include "maiconv/core/media/media_audio.hpp"
 #include "maiconv/core/media/media_cover.hpp"
+#include "maiconv/core/media/media_shared.hpp"
 #include "maiconv/core/media/media_video.hpp"
 #include "maiconv/core/simai/compiler.hpp"
 #include "maiconv/core/zip_util.hpp"
@@ -395,6 +396,18 @@ export_display_title(const TrackInfo &info,
 
 void push_warning(std::vector<std::string> &warnings, std::string warning) {
   warnings.push_back(std::move(warning));
+}
+
+// Appends why ffmpeg failed to a conversion-failed message. Draining also
+// clears the log, so each asset kind reports only its own attempts; without
+// this a stream-copy that failed before a successful transcode would resurface
+// later, attached to an unrelated failure.
+std::string with_ffmpeg_detail(std::string message) {
+  const std::string detail = media_shared_take_ffmpeg_failures();
+  if (!detail.empty()) {
+    message += " [" + detail + "]";
+  }
+  return message;
 }
 
 void append_dummy_tag(std::vector<std::string> &dummy_outputs,
@@ -1154,6 +1167,7 @@ process_track_folder(const std::filesystem::path &folder,
     std::vector<std::string> lookup_names;
 
     if (export_audio && !sources.music.bases.empty()) {
+      media_shared_clear_ffmpeg_failures();
       stems.clear();
       stems.reserve(6);
       append_unique_string(stems, "music" + info.id);
@@ -1188,8 +1202,9 @@ process_track_folder(const std::filesystem::path &folder,
                                     track_output / "track.mp3")) {
             push_warning(
                 result.warnings,
-                "Audio conversion failed: " + path_to_utf8(compressed_audio) +
-                    " -> " + path_to_utf8(track_output / "track.mp3"));
+                with_ffmpeg_detail("Audio conversion failed: " +
+                                   path_to_utf8(compressed_audio) + " -> " +
+                                   path_to_utf8(track_output / "track.mp3")));
             audio_incomplete = true;
           }
         }
@@ -1210,9 +1225,10 @@ process_track_folder(const std::filesystem::path &folder,
                                       track_output / "track.mp3")) {
             push_warning(
                 result.warnings,
-                "Audio conversion failed: " + path_to_utf8(acb_source) + " + " +
-                    path_to_utf8(awb_source) + " -> " +
-                    path_to_utf8(track_output / "track.mp3"));
+                with_ffmpeg_detail(
+                    "Audio conversion failed: " + path_to_utf8(acb_source) +
+                    " + " + path_to_utf8(awb_source) + " -> " +
+                    path_to_utf8(track_output / "track.mp3")));
             audio_incomplete = true;
           }
         } else {
@@ -1223,6 +1239,7 @@ process_track_folder(const std::filesystem::path &folder,
       }
     }
     if (export_cover && !sources.cover.bases.empty()) {
+      media_shared_clear_ffmpeg_failures();
       stems.clear();
       stems.reserve(8);
       append_unique_string(stems, "UI_Jacket_" + info.id);
@@ -1317,9 +1334,11 @@ process_track_folder(const std::filesystem::path &folder,
 
         if (!cover_exported) {
           if (!last_failed_cover_ab.empty()) {
-            push_warning(result.warnings,
-                         "Cover conversion failed: " + last_failed_cover_ab +
-                             " -> " + path_to_utf8(track_output / "bg.png"));
+            push_warning(
+                result.warnings,
+                with_ffmpeg_detail(
+                    "Cover conversion failed: " + last_failed_cover_ab +
+                    " -> " + path_to_utf8(track_output / "bg.png")));
           } else {
             push_warning(result.warnings,
                          "Cover missing: " + info.name + " (" + info.id + ")");
@@ -1329,6 +1348,7 @@ process_track_folder(const std::filesystem::path &folder,
       }
     }
     if (export_video && !sources.video.bases.empty()) {
+      media_shared_clear_ffmpeg_failures();
       stems.clear();
       stems.reserve(8);
       append_unique_string(stems, info.id);
@@ -1395,8 +1415,9 @@ process_track_folder(const std::filesystem::path &folder,
                                          track_output / "pv.mp4")) {
             push_warning(
                 result.warnings,
-                "Video conversion failed: " + path_to_utf8(video_source) +
-                    " -> " + path_to_utf8(track_output / "pv.mp4"));
+                with_ffmpeg_detail(
+                    "Video conversion failed: " + path_to_utf8(video_source) +
+                    " -> " + path_to_utf8(track_output / "pv.mp4")));
             video_incomplete = true;
           }
         }
