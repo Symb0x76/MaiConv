@@ -642,9 +642,10 @@ std::string Ma2Composer::compose(const Chart &source,
   } else {
     for (std::size_t i = 1; i < measures.size(); ++i) {
       const auto &target = measures[i];
-      const auto &source = (i == 1) ? first_measure : measures[i - 1];
+      // Named to avoid shadowing the `source` chart parameter (MSVC C4457).
+      const auto &source_measure = (i == 1) ? first_measure : measures[i - 1];
       out << "MET\t" << target.bar << "\t" << target.tick << "\t"
-          << source.quaver << "\t" << source.beats << "\n";
+          << source_measure.quaver << "\t" << source_measure.beats << "\n";
     }
   }
 

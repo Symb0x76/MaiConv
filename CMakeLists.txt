@@ -235,6 +235,10 @@ else()
         -Wextra
         -Wpedantic
         -Wconversion
+        # MSVC /W4 reports shadowing (C4456/C4457/C4458) but the GCC/Clang set
+        # above does not, so this class of finding used to reach CI only on the
+        # MSVC leg. Keep the two toolchains in agreement.
+        -Wshadow
     )
 endif()
 

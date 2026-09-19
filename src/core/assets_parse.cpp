@@ -183,8 +183,10 @@ TrackInfo parse_track_info(const std::filesystem::path &music_xml,
       }
     }
     info.genre = element_text(genre);
-  } else if (auto *genre = find_first_element_by_name(root, "genre")) {
-    info.genre = element_text(genre);
+    // Distinct name because the else-if init-statement lives in the scope of
+    // the `genre` above (MSVC C4456).
+  } else if (auto *genre_fallback = find_first_element_by_name(root, "genre")) {
+    info.genre = element_text(genre_fallback);
   }
   if (auto *version = find_first_element_by_name(root, "AddVersion")) {
     if (auto *version_id = version->FirstChildElement("id")) {
@@ -219,8 +221,11 @@ TrackInfo parse_track_info(const std::filesystem::path &music_xml,
   }
   if (auto *composer = find_first_element_by_name(root, "artistName")) {
     info.composer = element_text(composer);
-  } else if (auto *composer = find_first_element_by_name(root, "artist")) {
-    info.composer = element_text(composer);
+    // Distinct name because the else-if init-statement lives in the scope of
+    // the `composer` above (MSVC C4456).
+  } else if (auto *composer_fallback =
+                 find_first_element_by_name(root, "artist")) {
+    info.composer = element_text(composer_fallback);
   }
   if (auto *bpm = find_first_element_by_name(root, "bpm")) {
     info.bpm = element_text(bpm);

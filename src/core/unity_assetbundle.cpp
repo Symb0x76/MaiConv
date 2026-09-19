@@ -1,12 +1,29 @@
 #include "maiconv/core/io.hpp"
 #include "maiconv/core/unity_assetbundle_internal.hpp"
 
+// The vendored UABE headers declare parameters that shadow their own class
+// members (MSVC C4458, GCC/Clang -Wshadow). They are third-party and are
+// deliberately left unmodified, so the diagnostics are suppressed here at the
+// include site rather than in their source. This is the only first-party file
+// that includes them.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4458)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
+#endif
 #include "uabe/AssetsTools/AssetBundleFileFormat.h"
 #include "uabe/AssetsTools/AssetTypeClass.h"
 #include "uabe/AssetsTools/AssetsFileFormat.h"
 #include "uabe/AssetsTools/AssetsFileReader.h"
 #include "uabe/AssetsTools/AssetsFileTable.h"
 #include "uabe/Texture/lodepng.h"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 #include <algorithm>
 #include <array>
