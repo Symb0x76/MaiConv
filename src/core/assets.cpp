@@ -798,18 +798,33 @@ struct TrackProcessResult {
   AssetsTimingSummary timing;
 };
 
-TrackProcessResult process_track_folder(
-    const std::filesystem::path &folder, UtagePlayerSide forced_utage_side,
-    const AssetsOptions &options, const NumericFilterSet &target_music_filters,
-    const NumericFilterSet &target_difficulty_filters,
-    const VersionFilterSet &target_version_filters,
-    const std::vector<std::filesystem::path> &music_bases,
-    const std::vector<std::filesystem::path> &cover_bases,
-    const std::vector<std::filesystem::path> &video_bases,
-    const std::vector<AssetIndex> &music_indexes,
-    const std::vector<AssetIndex> &cover_indexes,
-    const std::vector<AssetIndex> &video_indexes,
-    OutputPathMutexPool &output_path_mutex_pool) {
+// Every asset kind is looked up the same way: candidate base directories
+// paired with a prebuilt index of each. These are non-owning views, built once
+// per run and passed down, so that the pairing stays visible instead of
+// arriving as six positional parameters that callers must keep in step.
+struct AssetSource {
+  const std::vector<std::filesystem::path> &bases;
+  const std::vector<AssetIndex> &indexes;
+};
+
+struct TrackAssetSources {
+  AssetSource music;
+  AssetSource cover;
+  AssetSource video;
+};
+
+struct TrackFilters {
+  const NumericFilterSet &music;
+  const NumericFilterSet &difficulty;
+  const VersionFilterSet &version;
+};
+
+TrackProcessResult
+process_track_folder(const std::filesystem::path &folder,
+                     UtagePlayerSide forced_utage_side,
+                     const AssetsOptions &options, const TrackFilters &filters,
+                     const TrackAssetSources &sources,
+                     OutputPathMutexPool &output_path_mutex_pool) {
   TrackProcessResult result;
   result.utage_side = forced_utage_side;
   try {
@@ -846,18 +861,17 @@ TrackProcessResult process_track_folder(
       return result;
     }
 
-    if (target_music_filters.active() &&
-        !target_music_filters.matches(info.id)) {
+    if (filters.music.active() && !filters.music.matches(info.id)) {
       return result;
     }
-    if (target_music_filters.active()) {
+    if (filters.music.active()) {
       result.matched_music_id = true;
     }
-    if (target_version_filters.active() &&
-        !matches_version_filter(info, target_version_filters)) {
+    if (filters.version.active() &&
+        !matches_version_filter(info, filters.version)) {
       return result;
     }
-    if (target_version_filters.active()) {
+    if (filters.version.active()) {
       result.matched_version = true;
     }
 
@@ -937,8 +951,8 @@ TrackProcessResult process_track_folder(
           continue;
         }
 
-        if (target_difficulty_filters.active() &&
-            !target_difficulty_filters.matches(
+        if (filters.difficulty.active() &&
+            !filters.difficulty.matches(
                 std::to_string(chart_entry.output_difficulty))) {
           continue;
         }
@@ -953,9 +967,8 @@ TrackProcessResult process_track_folder(
       for (const auto &ma2_file : all_ma2_files) {
         const int inferred_difficulty =
             infer_output_difficulty(info, ma2_file, zero_based_difficulty);
-        if (target_difficulty_filters.active() &&
-            !target_difficulty_filters.matches(
-                std::to_string(inferred_difficulty))) {
+        if (filters.difficulty.active() &&
+            !filters.difficulty.matches(std::to_string(inferred_difficulty))) {
           continue;
         }
         append_selected_chart(ma2_file, inferred_difficulty);
@@ -974,10 +987,10 @@ TrackProcessResult process_track_folder(
       selected_charts = std::move(filtered_charts);
     }
 
-    if (selected_charts.empty() && target_difficulty_filters.active()) {
+    if (selected_charts.empty() && filters.difficulty.active()) {
       return result;
     }
-    if (target_difficulty_filters.active()) {
+    if (filters.difficulty.active()) {
       result.matched_difficulty = true;
     }
 
@@ -1132,22 +1145,7 @@ TrackProcessResult process_track_folder(
     bool cover_incomplete = false;
     bool video_incomplete = false;
 
-    int id_number = to_int(info.id, 0);
-    if (id_number < 0) {
-      id_number = -id_number;
-    }
-    const std::string non_dx_id =
-        pad_music_id(std::to_string(id_number % 10000), 6);
-    const std::string short_id =
-        non_dx_id.size() >= 2 ? non_dx_id.substr(2) : non_dx_id;
-    const std::string cue_id =
-        info.cue_id.empty() ? non_dx_id : pad_music_id(info.cue_id, 6);
-    const std::string cue_short_id =
-        cue_id.size() >= 2 ? cue_id.substr(2) : cue_id;
-    const std::string movie_id =
-        info.movie_id.empty() ? non_dx_id : pad_music_id(info.movie_id, 6);
-    const std::string movie_short_id =
-        movie_id.size() >= 2 ? movie_id.substr(2) : movie_id;
+    const TrackMediaIds media_ids = derive_media_ids(info);
 
     const auto media_begin = std::chrono::steady_clock::now();
     std::vector<std::string> stems;
@@ -1155,14 +1153,14 @@ TrackProcessResult process_track_folder(
     std::vector<std::string> secondary_candidates;
     std::vector<std::string> lookup_names;
 
-    if (export_audio && !music_bases.empty()) {
+    if (export_audio && !sources.music.bases.empty()) {
       stems.clear();
       stems.reserve(6);
       append_unique_string(stems, "music" + info.id);
-      append_unique_string(stems, "music" + non_dx_id);
-      append_unique_string(stems, "music00" + short_id);
-      append_unique_string(stems, "music" + cue_id);
-      append_unique_string(stems, "music00" + cue_short_id);
+      append_unique_string(stems, "music" + media_ids.non_dx);
+      append_unique_string(stems, "music00" + media_ids.non_dx_short);
+      append_unique_string(stems, "music" + media_ids.cue);
+      append_unique_string(stems, "music00" + media_ids.cue_short);
 
       append_suffix_candidates(stems, {".mp3", ".ogg"}, primary_candidates);
       append_suffix_candidates(stems, {".acb", ".awb"}, secondary_candidates);
@@ -1175,7 +1173,7 @@ TrackProcessResult process_track_folder(
                           secondary_candidates.end());
 
       const auto found_audio =
-          find_asset_candidates_in_indexes(music_indexes, lookup_names);
+          find_asset_candidates_in_indexes(sources.music.indexes, lookup_names);
       const auto compressed_audio =
           first_found_candidate_in_order(found_audio, primary_candidates);
       if (!compressed_audio.empty()) {
@@ -1224,21 +1222,22 @@ TrackProcessResult process_track_folder(
         }
       }
     }
-    if (export_cover && !cover_bases.empty()) {
+    if (export_cover && !sources.cover.bases.empty()) {
       stems.clear();
       stems.reserve(8);
       append_unique_string(stems, "UI_Jacket_" + info.id);
-      append_unique_string(stems, "UI_Jacket_00" + short_id);
+      append_unique_string(stems, "UI_Jacket_00" + media_ids.non_dx_short);
       append_unique_string(stems, "ui_jacket_" + info.id);
-      append_unique_string(stems, "ui_jacket_" + non_dx_id);
+      append_unique_string(stems, "ui_jacket_" + media_ids.non_dx);
       append_unique_string(stems, "ui_jacket_" + info.id + "_s");
-      append_unique_string(stems, "ui_jacket_" + non_dx_id + "_s");
-      append_unique_string(stems, "UI_Jacket_" + movie_id);
-      append_unique_string(stems, "UI_Jacket_00" + movie_short_id);
-      append_unique_string(stems, "ui_jacket_" + movie_id);
-      append_unique_string(stems, "ui_jacket_00" + movie_short_id);
-      append_unique_string(stems, "ui_jacket_" + movie_id + "_s");
-      append_unique_string(stems, "ui_jacket_00" + movie_short_id + "_s");
+      append_unique_string(stems, "ui_jacket_" + media_ids.non_dx + "_s");
+      append_unique_string(stems, "UI_Jacket_" + media_ids.movie);
+      append_unique_string(stems, "UI_Jacket_00" + media_ids.movie_short);
+      append_unique_string(stems, "ui_jacket_" + media_ids.movie);
+      append_unique_string(stems, "ui_jacket_00" + media_ids.movie_short);
+      append_unique_string(stems, "ui_jacket_" + media_ids.movie + "_s");
+      append_unique_string(stems,
+                           "ui_jacket_00" + media_ids.movie_short + "_s");
 
       append_suffix_candidates(stems, {".png", ".jpg", ".jpeg"},
                                primary_candidates);
@@ -1277,7 +1276,7 @@ TrackProcessResult process_track_folder(
                           image_names.end());
       lookup_names.insert(lookup_names.end(), ab_names.begin(), ab_names.end());
       const auto found_cover =
-          find_asset_candidates_in_indexes(cover_indexes, lookup_names);
+          find_asset_candidates_in_indexes(sources.cover.indexes, lookup_names);
 
       const auto cover_image =
           first_found_candidate_in_order(found_cover, image_names);
@@ -1329,16 +1328,16 @@ TrackProcessResult process_track_folder(
         }
       }
     }
-    if (export_video && !video_bases.empty()) {
+    if (export_video && !sources.video.bases.empty()) {
       stems.clear();
       stems.reserve(8);
       append_unique_string(stems, info.id);
-      append_unique_string(stems, non_dx_id);
-      append_unique_string(stems, "00" + short_id);
-      append_unique_string(stems, short_id);
-      append_unique_string(stems, movie_id);
-      append_unique_string(stems, "00" + movie_short_id);
-      append_unique_string(stems, movie_short_id);
+      append_unique_string(stems, media_ids.non_dx);
+      append_unique_string(stems, "00" + media_ids.non_dx_short);
+      append_unique_string(stems, media_ids.non_dx_short);
+      append_unique_string(stems, media_ids.movie);
+      append_unique_string(stems, "00" + media_ids.movie_short);
+      append_unique_string(stems, media_ids.movie_short);
 
       append_suffix_candidates(stems, {".mp4"}, primary_candidates);
       const std::vector<std::string> video_mp4_names = primary_candidates;
@@ -1361,7 +1360,7 @@ TrackProcessResult process_track_folder(
       lookup_names.insert(lookup_names.end(), video_crid_names.begin(),
                           video_crid_names.end());
       const auto found_video =
-          find_asset_candidates_in_indexes(video_indexes, lookup_names);
+          find_asset_candidates_in_indexes(sources.video.indexes, lookup_names);
 
       auto video_source =
           first_found_candidate_in_order(found_video, video_mp4_names);
@@ -1526,6 +1525,29 @@ TrackProcessResult process_track_folder(
 }
 
 } // namespace
+
+TrackMediaIds derive_media_ids(const TrackInfo &info) {
+  const auto drop_leading_pair = [](const std::string &id) {
+    return id.size() >= 2 ? id.substr(2) : id;
+  };
+
+  int id_number = to_int(info.id, 0);
+  if (id_number < 0) {
+    id_number = -id_number;
+  }
+
+  TrackMediaIds ids;
+  // DX ids are the base id plus 10000; media assets are named after the
+  // non-DX form.
+  ids.non_dx = pad_music_id(std::to_string(id_number % 10000), 6);
+  ids.non_dx_short = drop_leading_pair(ids.non_dx);
+  ids.cue = info.cue_id.empty() ? ids.non_dx : pad_music_id(info.cue_id, 6);
+  ids.cue_short = drop_leading_pair(ids.cue);
+  ids.movie =
+      info.movie_id.empty() ? ids.non_dx : pad_music_id(info.movie_id, 6);
+  ids.movie_short = drop_leading_pair(ids.movie);
+  return ids;
+}
 
 int run_compile_assets(const AssetsOptions &requested_options) {
   // Local copy so that a manifest conflict can disable --resume for this run
@@ -1771,6 +1793,12 @@ int run_compile_assets(const AssetsOptions &requested_options) {
         std::min(jobs.size(), static_cast<std::size_t>(options.jobs));
     std::vector<TrackProcessResult> results(jobs.size());
     OutputPathMutexPool output_path_mutex_pool;
+    const TrackFilters track_filters{target_music_filters,
+                                     target_difficulty_filters,
+                                     target_version_filters};
+    const TrackAssetSources track_sources{{music_bases, music_indexes},
+                                          {cover_bases, cover_indexes},
+                                          {video_bases, video_indexes}};
     std::mutex progress_output_mutex;
     const auto emit_track_progress_immediately =
         [&](const TrackProcessResult &result) {
@@ -1787,11 +1815,9 @@ int run_compile_assets(const AssetsOptions &requested_options) {
 
     if (worker_count <= 1) {
       for (std::size_t i = 0; i < jobs.size(); ++i) {
-        results[i] = process_track_folder(
-            jobs[i].folder, jobs[i].utage_side, options, target_music_filters,
-            target_difficulty_filters, target_version_filters, music_bases,
-            cover_bases, video_bases, music_indexes, cover_indexes,
-            video_indexes, output_path_mutex_pool);
+        results[i] = process_track_folder(jobs[i].folder, jobs[i].utage_side,
+                                          options, track_filters, track_sources,
+                                          output_path_mutex_pool);
         emit_track_progress_immediately(results[i]);
         if (results[i].fatal_error.has_value() &&
             !options.ignore_incomplete_assets) {
@@ -1819,10 +1845,7 @@ int run_compile_assets(const AssetsOptions &requested_options) {
             }
             results[index] = process_track_folder(
                 jobs[index].folder, jobs[index].utage_side, options,
-                target_music_filters, target_difficulty_filters,
-                target_version_filters, music_bases, cover_bases, video_bases,
-                music_indexes, cover_indexes, video_indexes,
-                output_path_mutex_pool);
+                track_filters, track_sources, output_path_mutex_pool);
             emit_track_progress_immediately(results[index]);
             if (results[index].fatal_error.has_value() &&
                 !options.ignore_incomplete_assets) {

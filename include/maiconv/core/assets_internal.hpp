@@ -104,6 +104,23 @@ inline std::string path_to_generic_utf8(const std::filesystem::path &path) {
 #endif
 }
 
+// Ids derived from a track's music id, used to build the media filename
+// candidates that each asset kind searches for.
+struct TrackMediaIds {
+  std::string non_dx;
+  std::string non_dx_short;
+  std::string cue;
+  std::string cue_short;
+  std::string movie;
+  std::string movie_short;
+};
+
+// Hosted in assets.cpp.
+// Pure function of TrackInfo with no filesystem access: DX ids are the base id
+// plus 10000 and media assets are named after the non-DX form, while cue and
+// movie ids fall back to it when the metadata does not override them.
+TrackMediaIds derive_media_ids(const TrackInfo &info);
+
 // Hosted in assets_filter.cpp.
 std::pair<std::string, std::string>
 complete_version_fields(std::string version_id, std::string version);

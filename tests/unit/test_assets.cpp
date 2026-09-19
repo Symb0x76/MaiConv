@@ -1,4 +1,5 @@
 #include "maiconv/core/assets.hpp"
+#include "maiconv/core/assets_internal.hpp"
 #include "maiconv/core/io.hpp"
 #include "maiconv/core/simai/tokenizer.hpp"
 
@@ -305,6 +306,37 @@ void create_complete_maidata_fixture_012340(const fs::path &assets_root) {
 }
 
 } // namespace
+
+TEST_CASE("media ids derive from the non-DX form of the music id") {
+  TrackInfo info;
+
+  // A DX id is the base id plus 10000, and media assets are named after the
+  // non-DX form.
+  info.id = "011234";
+  auto ids = derive_media_ids(info);
+  REQUIRE(ids.non_dx == "001234");
+  REQUIRE(ids.non_dx_short == "1234");
+  // cue and movie fall back to the non-DX id when metadata does not set them.
+  REQUIRE(ids.cue == "001234");
+  REQUIRE(ids.movie == "001234");
+
+  // A non-DX id passes through unchanged.
+  info.id = "000456";
+  ids = derive_media_ids(info);
+  REQUIRE(ids.non_dx == "000456");
+  REQUIRE(ids.non_dx_short == "0456");
+
+  // Explicit cue/movie ids override the fallback and are padded to six digits.
+  info.id = "011234";
+  info.cue_id = "789";
+  info.movie_id = "42";
+  ids = derive_media_ids(info);
+  REQUIRE(ids.non_dx == "001234");
+  REQUIRE(ids.cue == "000789");
+  REQUIRE(ids.cue_short == "0789");
+  REQUIRE(ids.movie == "000042");
+  REQUIRE(ids.movie_short == "0042");
+}
 
 TEST_CASE("assets scans all subdirectories under assets root in flat layout") {
   const fs::path temp_root = unique_temp_dir("assets_scan");
