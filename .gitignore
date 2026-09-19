@@ -1,6 +1,10 @@
 # Build
 build/
 
+# Per-developer CMake presets (absolute toolchain paths); CMake reads this
+# alongside CMakePresets.json and it is not meant to be shared.
+CMakeUserPresets.json
+
 # Visual Studio Code
 .vscode/
 *.code-workspace
